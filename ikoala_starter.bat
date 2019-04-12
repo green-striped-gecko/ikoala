@@ -1,0 +1,1 @@
+"%~dp0/Program Files/R/R-3.4.2/bin/i386/Rscript" ikoala_mon_GUI.R 

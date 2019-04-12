@@ -1,0 +1,853 @@
+---
+output:
+  word_document:
+    fig_caption: yes
+    
+params:
+  location_table: declocations.csv
+  repname: ikoala.docx
+  resultsfolder: results
+  studysite: Coastal
+  tree_list_table: dectreenames.csv
+  tree_table: dectrees.csv
+  workdir: empty
+  grid350: 0
+  grid500: 1
+  grid1000: 0 
+---
+
+```{r initialize, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+#This section installs and loads all of the R-packages you need to run the report.... 
+
+suppressMessages(library(xtable, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(pander, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(knitr, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(rgdal, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(plyr, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(psych, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(ggmap, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(RgoogleMaps, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(ggplot2, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(vegan, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(akima, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(reshape2, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(RColorBrewer, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(rmarkdown, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(tcltk, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(tcltk2, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(rmarkdown, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(RColorBrewer, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(sp, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(maptools, quietly=TRUE, warn.conflicts=FALSE))
+
+
+#0. This version of ikoala.rmd is using a GUI ikoala_GUI.r. In case you do not want to run ikoala.rmd with the GUI you need to specify the input parameters below, by uncommenting and adjusting them. You also need to delete the params definition in the header of this file (line 3: "params:""  to line 9:  "studysite: !r "Southern Tablelands"" )
+
+# params <- list()
+# params$workdir <- "c:/aaron files/koala/ikoala"
+# params$location_table <- "declocations.csv"  #name of location csv file (LOCATION_MASTER in the access data base)
+# params$tree_list_table <-"dectreenames.csv"  #name of tree activity table (TREE_MASTER in the access data base)
+# params$tree_table <- "dectrees.csv" #name of tree list csv file (TREESPECIES_ID in the access data base)
+# params$resultsfolder <- "results56" #name of the results folder where the output is stored
+# params$studysite <- "Southern Tablelands"   # filter that is applied for the subset of locations (based on column study_site in the LOCATION_MASTER table)
+# params$grid <- 1000 # filter that is applied for the subset of location based on the grid being examined
+
+
+# 1.) Set the working directory where R should looking for the input files you are using for this analysis. 
+# R is a bit funny with how it reads file paths. Normally, a filepath would look like c:\directory\subdirectory\example. In R, you have to double the "\" in the file path. Thus to find the example directory above, you'd have to go to c:\\directory\\subdirectory\\example. Additionally, you need to enclose this text in double quotes. Replace the example text with your filepath (add it after the <-)
+ 
+workfolder<-params$workdir 
+if (workfolder=="empty" || is.null(workfolder)) workfolder <- getwd()
+
+
+# 2.) What are the names of your input files.... Need 3 files: the location table (has coordinates of the sites and grid name, etc.), the tree table (has the details for each individual tree that was searched), and the list of tree species you are searching example files are provided in XXXXXXX
+
+location_table<- params$location_table
+tree_table <- params$tree_table
+tree_list_table <- params$tree_list_table
+
+# 3.) Provide the names of your results folder before. This will be placed within your working directory
+
+resultsfolder<- params$resultsfolder
+
+
+# 4.) What study site are you using? Needs to be EXACTLY the same as the StudySite used on the ACCESS table.  
+
+region<-params$studysite
+
+#5. ) Specify the grid you want to use
+
+gridfil <-  c("350","500","1000")[as.logical(c(as.numeric(params$grid350),as.numeric(params$grid500),as.numeric(params$grid1000)))]
+
+
+
+# creates a folder to place the results
+
+dir.create(paste(workfolder,resultsfolder,sep="/"), showWarnings = FALSE)
+dir.create(paste(workfolder,resultsfolder,"figures",sep="/"), showWarnings = FALSE)
+dir.create(paste(workfolder,resultsfolder,"tables",sep="/"), showWarnings = FALSE)
+dir.create(paste(workfolder,resultsfolder,"shapefiles",sep="/"), showWarnings = FALSE)
+
+
+locationsALL<-read.csv(paste0(workfolder,"/",location_table))
+trees<-read.csv(paste0(workfolder,"/",tree_table))
+treelist<-read.csv(paste0(workfolder,"/",tree_list_table))
+
+######################
+# simplify databases #
+######################
+
+# have discovered that some programs automatically add "." or "_" to column names. Code added to overcome this complication...
+
+# first make everything uppercase...
+colnames(locationsALL)<-toupper(colnames(locationsALL))
+# next changed the relevant column names to names consistent with what we've coded. If the column names are changed again, you can adjust for it here for locationsALL...
+colnames(locationsALL)[grep("VISITED.SITE",names(locationsALL))]<-"VISITED SITE"
+colnames(locationsALL)[grep("STUDY.SITE",names(locationsALL))]<-"STUDY SITE"
+colnames(locationsALL)[grep("PLANNED.EASTING",names(locationsALL))]<-"Planned_Easting"
+colnames(locationsALL)[grep("PLANNED.NORTHING",names(locationsALL))]<-"Planned_Northing"
+colnames(locationsALL)[grep("STUDY.SITE",names(locationsALL))]<-"StudySite"
+colnames(locationsALL)[grep("DATE.SURVEYED",names(locationsALL))]<-"Date"
+
+# locationsALL
+# first get rid of all the sites that haven't been visited
+locations<-locationsALL[locationsALL$"VISITED SITE"==1,]
+# now get rid of all sites that aren't within the region of interest
+vlocations<-locations[locations$StudySite==region,]
+# drop all locations that are missing
+vlocations<-vlocations[!is.na(vlocations$"VISITED SITE"), ]
+# if we are using grid, keep only the grid that matches...
+if (length(gridfil)>0) vlocations<-vlocations[vlocations$GRID %in% gridfil,]
+# drop all columns that contain data that isn't needed
+vlocations<-vlocations[,c("ID","Planned_Easting", "Planned_Northing","StudySite")]
+
+# change ID to PLOT_ID to simplify merging with the tree data set
+colnames(vlocations)[1]<-"PLOT_ID"
+# the column names are changing frequently... This step is to change current version of the names to something that works with our code...
+
+
+if(length(vlocations$Planned_Easting)<1) stop("Please check the parameters (Study site and Grids) you are using. The filtered dataset contains no observations.")
+#convert Easting and Northing to lat and long
+xy<-as.matrix(vlocations[,c("Planned_Easting","Planned_Northing")])  
+latslongs <- data.frame(project(xy, "+proj=utm +zone=55 +south +ellps=WGS84 +datum=WGS84 +no_devs",inv=T)) 
+vlocations$Planned_Easting<-latslongs$Planned_Easting
+vlocations$Planned_Northing<-latslongs$Planned_Northing
+names(vlocations)[names(vlocations) == 'Planned_Easting'] <- 'Long'
+names(vlocations)[names(vlocations) == 'Planned_Northing'] <- 'Lat'
+
+
+# Clean up the treelist data set
+treelist<-treelist[,c("Species","ID","Scientific_name","Common_name")]
+treelist<-treelist[treelist$Species!="Blank", ] #remove species ID blank
+
+# Clean up trees
+trees<-trees[,c("ID","PLOT_ID","TREE_NUM","SPECIES_ID","DBH","STEM_NUM","KFP_CONFIRMED")]
+
+# begin combining datasets
+trees <- merge(trees, treelist, by.x="SPECIES_ID", by.y="ID")
+#add vlocations to trees (including treelist already)
+treesvlocation <- merge(trees, vlocations, by="PLOT_ID")
+# add counter (needed for several plots)
+treesvlocation$counter=1
+
+# determine whether there is any koala activity at a site or not. activity = 1, no activity = 0
+activity.sites <-ddply(treesvlocation, .(PLOT_ID), summarize, siteactive=max(KFP_CONFIRMED), Lat=mean(Lat), Long=mean(Long))
+
+
+
+# some code from Bernd for formatting markdown...
+knitr::opts_chunk$set(cache=FALSE)
+panderOptions("table.split.table", Inf)
+
+options(figcap.prefix = "Figure", figcap.sep = ":", figcap.prefix.highlight = "**")
+
+figRef <- local({
+    tag <- numeric()
+    created <- logical()
+    used <- logical()
+    function(label, caption, prefix = options("figcap.prefix"), 
+        sep = options("figcap.sep"), prefix.highlight = options("figcap.prefix.highlight")) {
+        i <- which(names(tag) == label)
+        if (length(i) == 0) {
+            i <- length(tag) + 1
+            tag <<- c(tag, i)
+            names(tag)[length(tag)] <<- label
+            used <<- c(used, FALSE)
+            names(used)[length(used)] <<- label
+            created <<- c(created, FALSE)
+            names(created)[length(created)] <<- label
+        }
+        if (!missing(caption)) {
+            created[label] <<- TRUE
+            paste0(prefix.highlight, prefix, " ", i, sep, prefix.highlight, 
+                " ", caption)
+        } else {
+            used[label] <<- TRUE
+            paste(prefix, tag[label])
+        }
+    }
+})
+
+tabRef <- local({
+    tag <- numeric()
+    created <- logical()
+    used <- logical()
+    function(label, caption, prefix = options("tabcap.prefix"), 
+        sep = options("tabcap.sep"), prefix.highlight = options("tabcap.prefix.highlight")) {
+        i <- which(names(tag) == label)
+        if (length(i) == 0) {
+            i <- length(tag) + 1
+            tag <<- c(tag, i)
+            names(tag)[length(tag)] <<- label
+            used <<- c(used, FALSE)
+            names(used)[length(used)] <<- label
+            created <<- c(created, FALSE)
+            names(created)[length(created)] <<- label
+        }
+        if (!missing(caption)) {
+            created[label] <<- TRUE
+            paste0(prefix.highlight, prefix, " ", i, sep, prefix.highlight, 
+                " ", caption)
+        } else {
+            used[label] <<- TRUE
+            paste(prefix, tag[label])
+        }
+    }
+})
+
+options(tabcap.prefix = "Table", tabcap.sep = ":", tabcap.prefix.highlight = "**")
+```
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.path=paste('/',resultsfolder,'/figures/',sep=""), dev='png', echo=FALSE,warning=FALSE, message=FALSE)
+```
+
+---
+title: "ikoala report"
+author: "Aaron Adamack and Bernd Gruber Version 0.2"
+date: "December 2015"
+output: word_document
+---
+
+This report used the following files and parameters:
+  
+*  Subset of locations (studysite): `r params$studysite`
+*  Subset of Grids : `r if (length(gridfil)>0) gridfil else "no grid filter"`
+*  Working directory: `r getwd()`
+*  Location file: `r params$location_table`
+*  Tree list file: `r params$tree_list_table`
+*  Tree master file: `r params$tree_table` 
+*  Results folder name: `r params$resultsfolder`
+*  Report file name: `r params$repname`
+
+
+# 1.) Introduction - Definition of terms and the scope of the report
+  
+This is an automatically generated report of koala activity in a specified sampling region. The terminology and analyses performed within this report are consistent with earlier reports by Phillips & Callaghan (2000), Allen et al. (2009), and Biolink (2011). The report examines three aspect of koala ecology within the sampling region:  
+  
+  *   Occurrence - determined by the presence or absence of koala faecal pellets at a sampling
+site
+  *   Activity - the proportion of trees with one or more koala faecal pellets at a sampling site
+  *   Preference for certain tree species (referred to as 'strike rate') - defined as the probability
+that a faecal pellet is found under a tree of a particular tree species
+
+(For more information on terminology and sampling methods, please, refer to the above mentioned
+reports)
+
+```{r coordlimits, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+##########################################################################
+# Find latitutde and longitude ranges for pulling a map from Google maps #
+##########################################################################
+#define map range
+latmin<-min(activity.sites$Lat, na.rm=TRUE)
+latmax<-max(activity.sites$Lat, na.rm=TRUE)
+latmin<-min(activity.sites$Lat[activity.sites$PLOT_ID!=338718],na.rm=TRUE) # need to 
+latmax<-max(activity.sites$Lat[activity.sites$PLOT_ID!=338718],na.rm=TRUE)
+longmin<-min(activity.sites$Long, na.rm=TRUE)
+longmax<-max(activity.sites$Long, na.rm=TRUE)
+longmin<-min(activity.sites$Long[activity.sites$PLOT_ID!=338718],na.rm=TRUE)
+longmax<-max(activity.sites$Long[activity.sites$PLOT_ID!=338718],na.rm=TRUE)
+
+# write out the site dimensions to a CSV file
+site_dimensions<-data.frame(latmin=latmin,latmax=latmax,longmin=longmin,longmax=longmax,region=region)
+write.csv(site_dimensions,file=paste(workfolder,"/",resultsfolder,"/tables/site_description.csv",sep=""))
+```
+Data collection at each sampling site consisted of searching the leaf litter within 1 m of the trunks of 30 trees at each sampling site for the presence of koala faecal pellets, identifying each tree's species and measuring its diameter at breast height (DBH). This report is for the `r params$studysite` study area that has an extent that ranges from `r round(latmin,2)` to `r round(latmax,2)` latitude and from `r round(longmin,2)` to `r round(longmax,2)` longitude. Sampling sites were located on a 1000 m sampling grid.
+
+# 2.) Results - Occurrence of koalas in the study area
+
+## 2.1) General summary for koala occurrence
+
+Sampling sites were labeled as active if at least one koala faecal pellet was found at the site. `r figRef("sitemap")` shows the location of sampling sites and whether a site was active or inactive while `r tabRef("summarytable")` summarizes the number of active and inactive sites, the number of trees searched and their split between active and inactive sites.
+
+
+```{r sitemap, fig.cap=figRef("sitemap","Sampling site locations and koala activity within the study area (blue = active sites, red = inactive sites)" )  ,echo=FALSE, results='hide', message=FALSE, warning=FALSE, fig.width=5,fig.height=5}
+#############################################
+# Create a map of active and inactive sites #
+#############################################
+if (is.null(activity.sites$mapzoom)){
+  newmap <- GetMap.bbox(lonR=c(longmin, longmax), latR=c(latmin, latmax), maptype="hybrid") 
+} else {
+  newmap <- GetMap.bbox(lonR=c(longmin, longmax), latR=c(latmin, latmax), maptype="hybrid", zoom= activity.sites$mapzoom)
+} 
+    
+colred <-rgb(1,0,0,0.8)
+colblue<-rgb(0,0,1,0.8)
+
+PlotOnStaticMap(newmap,lat = activity.sites$Lat, pch = 16, lon = activity.sites$Long,  cex=activity.sites$mapdotsize,  col=ifelse(activity.sites$siteactive==1,colblue,colred), FUN = points, add=FALSE)
+
+
+
+# Create a shapefile of the points...
+points.activity.sites<-SpatialPointsDataFrame(activity.sites[,c("Long","Lat")],activity.sites[,c("PLOT_ID","siteactive")])
+writeOGR(points.activity.sites,paste(workfolder,"/",resultsfolder,"/shapefiles/points_active_sites",sep=""),overwrite_layer=TRUE, delete_dsn=TRUE,layer="active_sites", driver="ESRI Shapefile")
+
+cat(showWKT("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"), file=paste(workfolder,"/",resultsfolder,"/shapefiles/points_active_sites/","active_sites.prj",sep="") )
+```
+
+```{r printsitemap, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+png(paste(workfolder,"/",resultsfolder,"/figures/sitemap.png",sep=""),width = 5, height=5, res = 300,units = "in")
+PlotOnStaticMap(newmap,lat = activity.sites$Lat, pch = 16, lon = activity.sites$Long,  cex=activity.sites$mapdotsize,  col=ifelse(activity.sites$siteactive==1,colblue,colred), FUN = points, add=FALSE)
+dev.off()
+```
+
+
+
+```{r summarizedata, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+##############################################
+# Create a summary table of the site details #
+##############################################
+
+#treesvlocationddply<-ddply(treesvlocation, .(PLOT_ID), summarize, activity01=max(KFP_CONFIRMED))
+
+# subset consisting of only active sites
+activesites<-activity.sites[activity.sites$siteactive==1,]#grab only data where koalas are present
+
+# get number of active and inactive sites and their relative percents
+numactive<-dim(activesites)[1] # [1] tells you to take the 1st part of the output of dim and ignore 2nd part
+numinactive<-dim(activity.sites[activity.sites$siteactive==0,])[1]
+numsites<-dim(activity.sites)[1]
+propactive<-round(numactive/numsites*100,digits=1)
+propinactive<-round(numinactive/numsites*100,digits=1)
+
+# count trees of various types across all sites
+numtrees<-dim(treesvlocation)[1]
+numactrees<-dim(treesvlocation[treesvlocation$KFP_CONFIRMED==1,])[1]
+numinactrees<-dim(treesvlocation[treesvlocation$KFP_CONFIRMED==0,])[1]
+propactrees<-round(numactrees/numtrees*100, digits=0)
+propinactrees<-round(numinactrees/numtrees*100, digits=0)
+
+# count trees of various types across active sites
+numtreesactsites <- dim(trees[trees$PLOT_ID %in% activesites$PLOT_ID,])[1]
+proptreesactsites<-round((numtreesactsites/numtrees*100), digits=0)
+numtreesinactsites <- dim(trees[trees$PLOT_ID %in% activity.sites$PLOT_ID[activity.sites$siteactive==0] ,])[1]
+proptreesinactsites<-round(numtreesinactsites/numtrees*100, digits=0)
+
+# build a summary table
+sumtable<-matrix(c(numsites,paste(numactive,"(",propactive,"%)"), paste(numinactive,"(",propinactive,"%)"), numtrees,paste(numactrees,"(",propactrees,"%)",sep=""),paste(numinactrees,"(",propinactrees,"%)",sep=""), paste(numtreesactsites, "(", proptreesactsites,"%)",sep=""), paste(numtreesinactsites, "(",proptreesinactsites,"%)",sep="")),ncol=1)
+colnames(sumtable)<-("Count and proportion")
+rownames(sumtable)<-c("Visited sites", "Active sites", "Inactive sites", "Examined trees", "Active trees", "Inactive trees", "Trees at active sites", "Trees at inactive sites")
+sumtable<-print(sumtable, digits=1, na.print="")
+write.csv(sumtable, file=paste(workfolder,"/",resultsfolder,"/tables/SumTable.csv",sep=""), na="")
+```
+
+
+\newpage
+```{r printsumtable, tab0, echo=FALSE, message=FALSE}
+set.caption(tabRef("summarytable","Summary for occurrence of koalas within the study area"))
+pander(sumtable)
+```
+
+## 2.2) Tree species composition of active and inactive sites
+
+```{r preptreenames, echo=FALSE, message=FALSE}
+# prepare treelist table
+Treelist<-ddply(treesvlocation, .(Species,Scientific_name,Common_name), summarize, count = sum(counter))
+Treelist<-Treelist[Treelist$"Species"!="Blank", ] #remove species ID blank
+TreesABC<-order(Treelist$"Species")#sort by ABC
+TreelistABC<-Treelist[TreesABC,c(1:3)]
+colnames(TreelistABC)[1:3]<-c("Tree ID", "Scientific name","Common name")
+write.csv(TreelistABC, row.names = F, file=paste(workfolder,"/",resultsfolder,"/tables/Treelist.csv",sep=""), na="")
+
+# quick addition to make Chris happy (e.g. use tree species name that he will be happy with...)
+chrisname<-Treelist[Treelist$count==max(Treelist$count),]
+
+```
+
+Differences in tree composition between active and inactive sites can be visualised using non-metric multidimensional scaling (NMDS) (`r figRef("firstnmds")`). The Bray-Curtis (dis)similarity measure is used to create a pairwise distance matrix between sampling sites based on the species composition of trees at sampling sites. NMDS plots are used to display the sites in two dimensions with more similar sampling sites being plotted more closely together while less similar sites being plotted further apart. By colour coding sampling sites based on whether the site was active or inactive for koalas, it is possible to determine if there are differences in tree composition between active and inactive sites. The more the active and inactive sites overlap, the less difference in tree species composition between active and inactive sites. A total overlap would indicate no difference whereas a complete separation of the two coloured clusters would indicate a 100% difference. 
+
+Additionally, we can plot individual tree species to show how strongly individual tree species are associated with site activity. Species that are 'typical' of active sites will appear near the center of the cluster of active sites while tree species that are atypical of active sites will be located some distance away from the center of the cluster. In more general terms, if a sampling site (represented by a particular point) is located near the name of a tree species (e.g. *`r chrisname$Scientific_name`* - `r chrisname$Species`), this indicates that *`r chrisname$Scientific_name`* is a common tree species at that site. A list of tree IDs and corresponding scientific and common names is provided in `r tabRef("treenames")`.
+
+
+```{r treenames, echo=FALSE, message=FALSE}
+set.caption(tabRef("treenames","List of tree IDs used in this report and corresponding scientific and common names."))
+pander(TreelistABC)
+```
+
+```{r firstnmds, echo=FALSE, results='hide', message=FALSE, fig.cap=figRef(label="firstnmds", caption="NMDS plot of sites within the study area (blue = active sites, red = inactive sites) created using Bray-Curtis distances. Ellipses show the 95% bounds for active and inactive sites. Tree names are indicative of tree species composition at sites."), warning=FALSE,fig.width=6,fig.height=4.5}
+###############################################################################
+# Create a figure showing the initial NMDS plot for active and inactive sites #
+# Blue dots indicate active sites and red dots inactive sites.                #
+###############################################################################
+
+# create a table where rows are for each PLOT_ID and each column is a count of the number of a particular tree type within the PLOT_ID 
+sitesp<- table(treesvlocation$PLOT_ID, treesvlocation$Species)
+
+sitesp <- matrix(sitesp, nrow=nrow(sitesp), ncol=ncol(sitesp), dimnames=list(rownames(sitesp), colnames(sitesp)))
+
+
+#delete plots that weren't surveyed (e.g. have no tree data) 
+sitesp<- sitesp[rowSums(sitesp)>0,]
+
+# perform an nmds using bray-curtis distances...
+nmds <- metaMDS(sitesp, distance="bray") 
+
+# plot the results....
+fig<- ordiplot(nmds, type="none")
+colred <-rgb(1, 0,0,0.6)
+colblue<-rgb(0,0,1,0.6)
+points(fig,"sites",pch=16, col=ifelse(activity.sites$siteactive==0,colred,colblue))
+text(fig,"species",cex = 0.8, col="black", font=3)
+
+# add the ellipses
+colours=activity.sites$siteactive
+ordiellipse(nmds, colours, col="red", show.groups=levels(as.factor(colours))[1], conf=0.95)
+ordiellipse(nmds, colours, col="blue", show.groups=levels(as.factor(colours))[2], conf=0.95)
+```
+
+```{r printfirstnmds, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+png(paste(workfolder,"/",resultsfolder,"/figures/firstnmds.png",sep=""),width = 6, height=4.5, res = 300,units = "in")
+fig<- ordiplot(nmds, type="none")
+colred <-rgb(1, 0,0,0.6)
+colblue<-rgb(0,0,1,0.6)
+points(fig,"sites",pch=16, col=ifelse(activity.sites$siteactive==0,colred,colblue))
+text(fig,"species",cex = 0.8, col="black", font=3)
+
+# add the ellipses
+colours=activity.sites$siteactive
+ordiellipse(nmds, colours, col="red", show.groups=levels(as.factor(colours))[1], conf=0.95)
+ordiellipse(nmds, colours, col="blue", show.groups=levels(as.factor(colours))[2], conf=0.95)
+dev.off()
+```
+
+
+```{r secondnmds, fig.cap=figRef("secondnmds", "NMDS plot for sites within the study area (blue = active sites, red = inactive sites) after the removal of 'outliers'. Outliers were defined as 'sites in the original NMDS lot with an absolute value of MDS scores >5"), echo=FALSE, results='hide', message=FALSE, warning=FALSE, fig.width=6, fig.height=4.5}
+###############################################################################
+# Create a figure showing the second NMDS plot for active and inactive sites  #
+# Blue dots indicate active sites and red dots inactive sites.                #
+# We remove outliers here, any value "|>5|"                                   #
+###############################################################################
+
+MDSsite.scores<-nmds$points
+MDS2activity.sites<-cbind(activity.sites,MDSsite.scores)
+MDS2activity.sites<-MDS2activity.sites[(MDS2activity.sites$MDS1<abs(5)) & (MDS2activity.sites$MDS2<abs(5)),]
+
+# Building a new tree database that only includes sites that weren't outliers in the first NMDS plot
+MDS2treesvlocation<-treesvlocation[treesvlocation$PLOT_ID %in% MDS2activity.sites$PLOT_ID,]
+
+# Create a new table that has PLOT_ID in rows and tree counts in columns
+sitesp2<- table(MDS2treesvlocation$PLOT_ID, MDS2treesvlocation$Species)
+
+sitesp2 <- matrix(sitesp2, nrow=nrow(sitesp2), ncol=ncol(sitesp2), dimnames=list(rownames(sitesp2), colnames(sitesp2)))
+
+
+
+# Drop any PLOT_IDs that lack trees
+sitesp2<- sitesp2[rowSums(sitesp2)>0,]
+
+# Rerun NMDS analysis
+nmds2 <- metaMDS(sitesp2,distance="bray") 
+
+# Make the plot...
+colours2<-MDS2activity.sites$siteactive
+fig2<-ordiplot(nmds2, type="none")
+colred<-rgb(1, 0,0,0.4)
+colblue<-rgb(0,0,1,0.4)
+points(fig2,"sites",pch=16, col=ifelse(activity.sites$siteactive==0,colred,colblue))
+text(fig2,"species",cex = 0.8, col="black", font=3)
+
+# add the ellipses
+ordiellipse(nmds2, colours2, col="red", show.groups=levels(as.factor(colours2))[1], conf=0.95)
+ordiellipse(nmds2, colours2, col="blue", show.groups=levels(as.factor(colours2))[2], conf=0.95)
+```
+
+```{r printsecondnmds, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+png(paste(workfolder,"/",resultsfolder,"/figures/firstnmds.png",sep=""),width = 6, height=4.5, res = 300,units = "in")
+fig2<-ordiplot(nmds2, type="none")
+colred<-rgb(1, 0,0,0.4)
+colblue<-rgb(0,0,1,0.4)
+points(fig2,"sites",pch=16, col=ifelse(activity.sites$siteactive==0,colred,colblue))
+text(fig2,"species",cex = 0.8, col="black", font=3)
+
+# add the ellipses
+ordiellipse(nmds2, colours2, col="red", show.groups=levels(as.factor(colours2))[1], conf=0.95)
+ordiellipse(nmds2, colours2, col="blue", show.groups=levels(as.factor(colours2))[2], conf=0.95)
+dev.off()
+```
+
+
+# 3.) Results - Activity of koalas in the study area
+Koala activity at each sampling site was determined by dividing the number of trees with koala faecal pellets under them by the total number of trees at the sampling site (`r figRef("activity_point_map")`). Areas of elevated koala activity are shown using activity contours. Activity contours are analagous to elevation contours - they are derived from the activity values of each sampled site and its 12 nearest neighbours and join points of equal koala activity. The values for activity of koalas in unsampled points (i.e. in between sampling sites) is interpolated using a smoothing function.   
+
+
+
+```{r prepactivitymaps, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+#########################################################
+# Analysis steps to prepare data for the activity plots #
+#########################################################
+
+# count the number of trees at a site and the number of trees with koala activity
+siteactivity<-ddply(treesvlocation,.(PLOT_ID),sitesum01=sum(KFP_CONFIRMED), sumtreessites=sum(counter), Lat=mean(Lat), Long=mean(Long), summarize)
+
+#siteactivity<-siteactivity[siteactivity$PLOT_ID!=338718,] # don't know if we need this or not....
+
+# determine the proportion of trees that are active...
+siteactivity$site.activity<-siteactivity$sitesum01/siteactivity$sumtreessites
+#need to remove missing values as are not allowed in the matrix for contours
+siteactivity<-siteactivity[!is.na(siteactivity$Long),]
+```
+
+
+
+```{r activity_point_map, fig.cap=figRef("activity_point_map", "Site-specific koala activity levels (measured in terms of number of trees with koala faecal pellets)"), echo=FALSE, results='hide', message=FALSE, warning=FALSE, fig.width=6, fig.height=6}
+# grab a new map
+if (is.null(siteactivity$mapzoom)){
+  activemap <- GetMap.bbox(lonR=c(longmin, longmax), latR=c(latmin, latmax), maptype="hybrid") 
+} else {
+  activemap <- GetMap.bbox(lonR=c(longmin, longmax), latR=c(latmin, latmax), maptype="hybrid", zoom= siteactivity$mapzoom)
+}
+
+activitycontour <- with(siteactivity, interp(x=Long, y=Lat, z=site.activity, extrap=FALSE, duplicate = "strip"))
+contours<-contourLines(activitycontour, nlevels=6, levels=c(seq(1,16,3)/30))
+
+
+# build colour bar and data set for the activity plots
+cols<-rep(NA,7)
+cols[1]<-"gray60"
+cols[2:7]<-brewer.pal(6,"OrRd")
+activity.legendtext<-c("0", paste(seq(1,16,3),"-",seq(3,18,3),sep=" ")) 
+
+
+# plot points first
+PlotOnStaticMap(activemap, lat = siteactivity$Lat, lon = siteactivity$Long, pch = 16, col =cols[ceiling(siteactivity$sitesum01/3)+1], add = FALSE, FUN = points, cex=0.6)
+legend("bottomright", legend = activity.legendtext, pch=16, col=cols, bg = "grey", title = "Koala activity", cex= 0.8)
+
+#then contours
+for (i in 1:length(contours))
+{
+  cc2 <- ceiling(contours[[i]]$level*10)#/mc *10
+  PlotOnStaticMap(activemap, lon = contours[[i]]$x, 
+                  lat =contours[[i]]$y, 
+                  lwd=2,col=cols[cc2+1], FUN = lines, add=TRUE)
+}       
+
+# need to do the contours to shape files here...
+# Create a shapefile of the points...
+siteactivity$levels<-ceiling(siteactivity$sitesum01/3)+1
+points.site.activity.levels<-SpatialPointsDataFrame(siteactivity[,c("Long","Lat")],siteactivity[,c("PLOT_ID","site.activity","levels")])
+writeOGR(points.site.activity.levels,paste(workfolder,"/",resultsfolder,"/shapefiles/points_active_levels",sep=""),overwrite_layer=TRUE, delete_dsn=TRUE,layer="active_levels_points", driver="ESRI Shapefile")
+
+cat(showWKT("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"), file=paste(workfolder,"/",resultsfolder,"/shapefiles/points_active_levels/","active_levels_points.prj",sep="") )
+
+
+# create a shapefile of the contours
+contour.shp<-ContourLines2SLDF(contours)
+writeOGR(contour.shp,paste(workfolder,"/",resultsfolder,"/shapefiles/contours_active_levels",sep=""),overwrite_layer=TRUE, delete_dsn=TRUE,layer="activity_contours", driver="ESRI Shapefile")
+
+cat(showWKT("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"), file=paste(workfolder,"/",resultsfolder,"/shapefiles/contours_active_levels/","activity_contours.prj",sep="") )
+
+
+```
+
+```{r printactivity_point_map, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+png(paste(workfolder,"/",resultsfolder,"/figures/activity_point_map.png",sep=""),width = 6, height=6, res = 300,units = "in")
+# plot points first
+PlotOnStaticMap(activemap, lat = siteactivity$Lat, lon = siteactivity$Long, pch = 16, col =cols[ceiling(siteactivity$sitesum01/3)+1], add = FALSE, FUN = points, cex=0.6)
+legend("bottomright", legend = activity.legendtext, pch=16, col=cols, bg = "grey", title = "Koala activity", cex= 0.8)
+
+#then contours
+for (i in 1:length(contours))
+{
+  cc2 <- ceiling(contours[[i]]$level*10)#/mc *10
+  PlotOnStaticMap(activemap, lon = contours[[i]]$x, 
+                  lat =contours[[i]]$y, 
+                  lwd=2,col=cols[cc2+1], FUN = lines, add=TRUE)
+}       
+dev.off()
+```
+
+
+# 4.) Results - Preference of koalas for certain tree species
+## 4.1) Strike rate
+Preference of koalas for certain tree species was determined as the probability (strike rate) of finding koala faecal pellets under particular tree species. A summary of strike rates by tree species is provided in `r tabRef("srsummary")`.
+
+In this section, we modified the data analysis methods of Phillips & Callaghan (2000). In their report,  Phillips & Callaghan (2000) defined strike rate as the probability that a faecal pellet would be found under a particular tree species and only considered trees at active sites (i.e. the number of trees of species X with one or more faecal pellets divided by the total number of trees of species X at all active sites). Here, we calculated site-specific strike rates for each tree species (i.e. the number of trees of species X with one or more faecal pellets at a site divided by the total number of trees of species X at that site) across all active sites. This enables us to visualise the distribution of strike rates across active sites for a particular species rather than just knowing the mean value of the strike rate for a particular tree species across all active sites. 
+
+The distribution of strike rates for each tree species across all active sites is shown  in `r figRef("siteboxplots")` where we overlaid boxplots with dotplots. Dotplots show actual values of strike rates at each site. However, since multiple sites can have the same strike rate, which would not be visible using dotplots only, the boxplots provide additional information about stike rate distribution. The bottom edge of the box corresponds to the lowest 25% of strike rates for a species, the line in the box shows the median (lowest 50%) and the top edge of the box corresponds to the upper 75% of strike rates for a particular tree species. The whiskers at the top and bottom of the box indicate 1.5x the inter-quartile range and the dots outside the range of the whiskers represent outliers (i.e. values beyond 1.5x(the 75% cut-off value - the 25% cut-off value)).
+
+
+```{r strikeratecalcs, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+##############################################################################
+# This section is doing the preliminary calculations for strike rate figures #
+##############################################################################
+
+#sum of all trees at all sites for each species
+overallSR<-ddply(treesvlocation,.(Species,StudySite),sumtreesspecies=sum(counter), summarize)
+#sum of all active trees per species
+strikedtrees<-ddply(treesvlocation,.(Species),speciessum01=sum(KFP_CONFIRMED),summarize)
+#overall strike rate
+overallSR$probability<-strikedtrees$speciessum01/overallSR$sumtreesspecies
+#change SPecies to characters so that they plot by ABC
+overallSR$Species<-as.character(overallSR$Species) 
+# get a dataset for tree data only at active sites
+acttreesvlocation<-treesvlocation[treesvlocation$PLOT_ID %in% activity.sites$PLOT_ID[activity.sites$siteactive==1],]
+
+# calculate the strike rate by tree species at each active site
+# count the number of trees and kfp by tree species at each PLOT_ID
+sitespecificSR<-ddply(acttreesvlocation,.(PLOT_ID, Species),sumspeciessite=sum(counter),sitespeciessum01=sum(KFP_CONFIRMED), summarize)
+# calculate the strike rate
+sitespecificSR$probability<-sitespecificSR$sitespeciessum01/sitespecificSR$sumspeciessite
+# fix the problem of species being read in as factors...
+sitespecificSR$Species<-as.character(sitespecificSR$Species)
+
+# prepare for selection boxplots...
+numpellets<-sum(treesvlocation$KFP_CONFIRMED)
+treeprobstrike<-ddply(treesvlocation,.(Species), summarize, speciessum01=sum(KFP_CONFIRMED), sumtreesspecies=sum(counter), probability=speciessum01/sumtreesspecies)
+numtrees<-sum(treeprobstrike$sumtreesspecies)
+#create matrix for results to be put in: replicates = 1000, j = tree species
+distvals<-matrix(NA,ncol=dim(treeprobstrike)[1],nrow=1000)
+for (j in 1:dim(treeprobstrike)[1]){
+  simstrikes<-rbinom(1000,numpellets,treeprobstrike$sumtreesspecies[j]/numtrees)
+  simstrikes[simstrikes>treeprobstrike$sumtreesspecies[j]]<-treeprobstrike$sumtreesspecies[j]
+  distvals[,j]<-treeprobstrike$probability[j]-simstrikes/treeprobstrike$sumtreesspecies[j]
+}
+colnames(distvals)<-treeprobstrike$Species
+percs<-apply(distvals,2,quantile,probs=c(0.025,0.975))
+net<-(colSums(percs>0)==2)-(colSums(percs<0)==2)
+net<-data.frame(species=names(net),select=unname(net))
+tempmelt<-melt(distvals) #makes short and fat into long and skinny (tables)
+colnames(tempmelt)<-c("replicate","species","delta")
+tempmelt<-merge(tempmelt,net,all.x=T)
+
+
+
+
+# prepare strike rate summary tables for each tree species
+
+#summary of inactive sites
+inactsites<-treesvlocation[treesvlocation$PLOT_ID %in% activity.sites$PLOT_ID[activity.sites$siteactive==0] ,]
+#summary of active sites
+actsites<-treesvlocation[treesvlocation$PLOT_ID %in% activity.sites$PLOT_ID[activity.sites$siteactive==1] ,]
+#number of inactive sites each species is present at
+Ninactsites<-ddply(inactsites,.(Species), summarize, Ninactsites=length(unique(PLOT_ID))) 
+#number of active sites each species is present at 
+Nactsites<-ddply(actsites,.(Species), summarize, Nactsites=length(unique(PLOT_ID))) 
+#number of trees across all inactive sites for each species
+Ntreesinactsites<-ddply(inactsites,.(Species), summarize, Ntreesinactsites=sum(counter)) 
+#number of trees across all active sites for each species
+Ntreesactsites<-ddply(actsites,.(Species), summarize, Ntreesactsites=sum(counter)) 
+#this should be (and it is) identical with sitespecificSR$sumspeciessite
+#x<-ddply(sitespecificSR,.(Species),sumtreesatactive=sum(sumspeciessite), summarize)
+#number of trees with faecal pellets for each species
+NtreesFP<-ddply(treesvlocation, .(Species), summarize, NtreesFP=sum(KFP_CONFIRMED))
+#this should be identical (and it is) with acttreessite$sitespeciessum01
+#y<-ddply(acttreessite, .(Species),sumFP=sum(sitespeciessum01), summarize)
+#mean SR and sd for each species 
+meanSR<-aggregate(sitespecificSR$probability, list(Species = sitespecificSR$Species), mean)
+stdevSR<-aggregate(sitespecificSR$probability, list(Species = sitespecificSR$Species), sd)
+#merge everything
+Tab1<-merge(TreelistABC, Ninactsites, by.x="Tree ID", by.y = "Species",all.x=TRUE)
+Tab2<-merge(Tab1,Nactsites,by.x="Tree ID", by.y = "Species",all.x=TRUE)
+Tab3<-merge(Tab2,Ntreesinactsites,by.x="Tree ID", by.y = "Species",all.x=TRUE)
+Tab4<-merge(Tab3,Ntreesactsites,by.x="Tree ID", by.y = "Species",all.x=TRUE)
+Tab5<-merge(Tab4,NtreesFP, by.x="Tree ID", by.y = "Species",all.x=TRUE)
+Tab6<-merge(Tab5,meanSR, by.x="Tree ID", by.y = "Species",all.x=TRUE)
+Tab7<-merge(Tab6, stdevSR, by.x="Tree ID", by.y = "Species",all.x=TRUE)
+Tab7$sterrorSR<-round(Tab7$"x.y"/sqrt(Tab7$Ntreesactsite),digits=3)
+Tab7$meanSR<-round(Tab7$"x.x", digits=3)
+#add plusminus to SE
+Tab7$SE<-Tab7$sterrorSR
+#Tab7$"Mean SR?SE"<-paste(Tab7$meanSR,Tab7$sterrorSR, sep=" $ \\pm $ ")
+SRsumtable<-Tab7[,c(1,4:8,12,13)]
+colnames(SRsumtable)[1:8]<-c("Tree ID", "# of inactive sites","# of active sites", "Count at inactive sites","Count at active sites","# of faecal pellets", "Mean strike rate", "±SE")
+write.csv(SRsumtable, row.names = F,file=paste(workfolder,"/",resultsfolder,"/tables/SRsumtable.csv",sep=""), na="")
+```
+
+
+```{r tab2, echo=FALSE, message=FALSE}
+set.caption(tabRef("srsummary","Summary of koala activity by tree species for active and inactive sites within the study area. ('N inactive sites' and 'N active sites' = the number of inactive and active sites the species was recorded at respectively; 'N trees at inactive sites' and 'N trees at active sites' = the number of trees of a species recorded at inactive and active sites respectively; 'N trees with faecal pellets' = the number of trees of a species with faecal pellets;and 'Mean strike rate (and standard error)' were calculated from the site-specific strike rate data)."))
+pander(SRsumtable)
+```
+
+
+```{r siteboxplots, fig.cap=figRef("siteboxplots", "Boxplots showing the distribution of site-specific strike rates at active sites and dots showing the site-specific strike rates of individual sites."), echo=FALSE, warning=FALSE, fig.width=8, fig.height=4}
+print(ggplot(sitespecificSR, aes(x = Species, y = probability)) + geom_boxplot(outlier.shape = NA)+ geom_point(position = position_jitter(w = 0.2, h = 0),col="turquoise")+xlab("Tree species")+ylab("Strike rate") +theme_classic() +
+    theme(axis.text.x = element_text(size=10,color="black",angle=-90,vjust=0.5,hjust=0),axis.text.y = element_text(size=10,color="black"),axis.title = element_text(size=14),title=element_text(size=14), axis.line=element_line(colour="black"))) 
+```
+
+```{r printsiteboxplots, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+png(paste(workfolder,"/",resultsfolder,"/figures/siteboxplots.png",sep=""),width = 8, height=4, res = 300,units = "in")
+print(ggplot(sitespecificSR, aes(x = Species, y = probability)) + geom_boxplot(outlier.shape = NA)+ geom_point(position = position_jitter(w = 0.2, h = 0),col="turquoise")+xlab("Tree species")+ylab("Strike rate") +theme_classic() +
+    theme(axis.text.x = element_text(size=10,color="black",angle=-90,vjust=0.5,hjust=0),axis.text.y = element_text(size=10,color="black"),axis.title = element_text(size=14),title=element_text(size=14), axis.line=element_line(colour="black"))) 
+dev.off()
+```
+
+
+## 4.2) Overall strike rate
+We developed a second measure of strike rates to investigate the study's data on tree species selection by koalas, which we call the overall strike rate. The overall strike rate differs from the original strike rate in that it considers all sites, whether or not the site is active (i.e. the number of trees of species X with one or more faecal pellets is divided by the sum of all trees of species X at all visited sites). Overall strike rates for each species are shown in `r figRef("overallSR")`. Please, note that the overall strike rate for each species is a single value (i.e. the mean probability across all sites), therefore no distribution is shown in `r figRef("overallSR")`. If koalas truly prefer tree species X, the overall strike rate for the tree species (shown above) would be high. 
+
+
+```{r overallSR, fig.cap=figRef("overallSR", "Overall strike rates for each tree species present at visited sites."), echo=FALSE, warning=FALSE, fig.width=8, fig.height=4}
+p_range <- range(0, 0.05+max(overallSR$probability))
+print(
+  ggplot(overallSR, aes(x = Species, y = probability)) + geom_bar(stat = "identity",fill="grey")+xlab("Tree species")+ylab("Overall strike rate") +theme(panel.background = element_rect(fill='white'),axis.text.x = element_text(size=10,color="black",angle=-90,vjust=0.5,hjust=0),axis.text.y = element_text(size=10,color="black"),axis.title = element_text(size=14),title=element_text(size=14), panel.grid.minor.y = element_line(colour = "black", linetype = "dotted"),panel.grid.major.y = element_line(colour = "black", linetype = "dotted"), axis.line=element_line(colour="black")) + coord_cartesian(ylim =p_range) )
+```
+
+```{r printoverallSR, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+png(paste(workfolder,"/",resultsfolder,"/figures/overallSR.png",sep=""),width = 8, height=4, res = 300,units = "in")
+print(
+  ggplot(overallSR, aes(x = Species, y = probability)) + geom_bar(stat = "identity",fill="grey")+xlab("Tree species")+ylab("Overall strike rate") +theme(panel.background = element_rect(fill='white'),axis.text.x = element_text(size=10,color="black",angle=-90,vjust=0.5,hjust=0),axis.text.y = element_text(size=10,color="black"),axis.title = element_text(size=14),title=element_text(size=14), panel.grid.minor.y = element_line(colour = "black", linetype = "dotted"),panel.grid.major.y = element_line(colour = "black", linetype = "dotted"), axis.line=element_line(colour="black")) + coord_cartesian(ylim =p_range) )
+dev.off()
+```
+
+
+## 4.3) Tree species preference
+While the overall strike rate helps to determine if koalas are showing a preference for some tree species over others, it does not account for differences in the number of trees of each species. Thus, a tree species with only a few sampled trees, could have a very high overall strike rate with just 1 or 2 trees having faecal pellets. On the other hand, an abundant species would require significant numbers of trees with faecal pellets to have a high overall strike rate, but this is made difficult when koalas are potentially only using a small portion of trees in the region. To account for this problem, we used bootstrap simulations to test whether the observed overall strike rate for a tree species was significantly different from the overall strike rate that would be expected if koalas were choosing trees at random (hereafter referred to as simulated strike rate).
+
+For each tree species in the study area, we performed a bootstrap simulation with 100,000 permutations. For each set of simulations, we first determined the relative abundance of a tree species across all visited sites (i.e. the number of trees of species X / the number of all trees), the total number of trees with koala faecal pellets present, and the number of trees of species X with faecal pellets present. 
+
+For each bootstrap permutation, we generated a random deviate from a binomial distribution which represented the number of strikes assuming koalas choose trees at random. The number of trials was set to the total number of trees with koala faecal pellets present (all tree species), and the probability of a success was set to the proportion of all trees that were trees of species X. As it was possible to generate a random deviate that exceeded the number of trees of a species of interest, if the random deviate exceeded the number of trees of interest we adjusted the random deviate downward to the total number of trees of the species of interest. The random deviate was then converted to simulated strike rate by dividing the random deviate by the total number of trees of species X. Finally, the difference between the observed overall strike rate and the simulated strike rate was determined. After 100,000 permutations were performed, the middle 95% of the distribution of the differences between the observed and simulated strike rates was determined. If the middle 95% of the distribution of differences for a tree species does not include 0, it indicates that koalas are actively avoiding (distribution is below 0) or selecting for (distribution is above 0) a tree species (`r figRef("koalaselection")`). 
+Bootstrapping is a stochastic process and for tree species that are on the cusp of being positively or negatively selected, their selection status can vary from one set of bootstrap simulations to another. However, by using a high number of replicates, we have reduced the likelihood of that happening.  
+
+
+```{r koalaselection, fig.cap=figRef("koalaselection", "Distributions of observed - simulated strike rates assuming that koalas choose trees within the study area at random. Distributions whose middle 95% do not include 0 suggest that the tree species is either being positively selected (i.e. the boxplot is above 0 and has a blue fill colour) or negatively selected (i.e. the boxplot is below 0 and has a red fill colour). Boxes for tree species that are being neutrally selected have a yellow fill colour."), echo=FALSE, warning=FALSE, fig.width=8, fig.height=10}
+p<-ggplot(tempmelt, aes(species, delta,fill=factor(select)))+geom_boxplot()+scale_fill_manual(name="Selection by koalas",values=c("1"="blue","0"="yellow","-1"="red"),labels=c("1"="Positive","0"="Neutral","-1"="Negative"),breaks=c("1","0","-1"))+xlab("Tree species")+ylab("Observed - simulated strike rate")
+print(
+    p + geom_boxplot()+theme_classic()+theme(axis.text.x = element_text(size=10,color="black",angle=-90,vjust=0.5,hjust=0),axis.text.y = element_text(size=10),axis.title = element_text(size=14),title=element_text(size=14))+geom_hline(yintercept=0.00)+ylim(-0.5,0.5)+ theme(legend.position=c(.92, .85))
+  )
+```
+
+```{r printkoalaselection, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+png(paste(workfolder,"/",resultsfolder,"/figures/koalaselection.png",sep=""),width = 10, height=8, res = 300,units = "in")
+p<-ggplot(tempmelt, aes(species, delta,fill=factor(select)))+geom_boxplot()+scale_fill_manual(name="Selection by koalas",values=c("1"="blue","0"="yellow","-1"="red"),labels=c("1"="Positive","0"="Neutral","-1"="Negative"),breaks=c("1","0","-1"))+xlab("Tree species")+ylab("Observed - simulated strike rate")
+print(
+    p + geom_boxplot()+theme_classic()+theme(axis.text.x = element_text(size=10,color="black",angle=-90,vjust=0.5,hjust=0),axis.text.y = element_text(size=10),axis.title = element_text(size=14),title=element_text(size=14))+geom_hline(yintercept=0.00)+ylim(-0.5,0.5)+ theme(legend.position=c(.92, .85))
+  )
+dev.off()
+```
+
+## 4.4) Tree size preference
+In addition to the preference of koalas for tree species, we also investigated the preferences of koalas for different tree sizes. Trees of each individual species were divided into 100 mm DBH intervals (i.e. 100 to 199 mm, 200 to 299 mm, etc.) and the strike rate (i.e. the probability considering active sites only) for each size class for each species was determined. The relationship between tree size and their use by koalas is shown in Figure `r figRef("sizeSR")`. For each tree species, we performed a weighted linear regression between strike rate and tree size, with each size class weighted by the number of trees (of the species of interest) in the size class. Results for all tree species are shown in `r tabRef("regsum")`. The R^2^ value shows the proportion of the change in strike rate with tree size that can be attributed to tree size. The closer the R^2^ value is to 0, the weaker the relationship between tree DBH and koala strike rate for a particular species while the closer the R^2^ value is to 1, the more important the role of tree size in the selection of trees by koalas. The slope of the relationship informs us about the overall direction of the relationship. A positive slope value indicates that koalas prefer larger trees than smaller trees of a particular species, whereas negative slope value indicates the opposite. The absolute value for the slope (i.e. how far the slope value is from zero in any direction) tells us about the steepness of the relationship. High absolute value for the slope indicates that there is a large difference in strike rates between size class 1 and size class 2, and size class 2 and size class 3, etc. The p-value provides information about the significance of the observed relationship - in general, only relationships with $p<0.05$ are considered to be significant, but if regressions are being performed for a large number of trees, a more appropriate significance level is $0.05/N$, where N is the number of regressions performed.
+
+```{r treesizepref, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+###################################
+# Conduct the regression analysis #
+###################################
+                                                                                                    
+# get the active sites
+activonly.treesites<-treesvlocation[treesvlocation$PLOT_ID %in% activity.sites$PLOT_ID[activity.sites$siteactive==1],]
+# divide the tree DBHes into 10 cm size intervals
+activonly.treesites$sizeclass<-activonly.treesites$DBH %/% 100
+# calculate strike rate by size class
+strikedbhres<-ddply(activonly.treesites, .(SPECIES_ID,sizeclass), summarize, strikes=sum(KFP_CONFIRMED), treesnr=length(KFP_CONFIRMED), str_rate=strikes/treesnr)
+# fit a simple linear model weighted by number of trees
+models <- dlply(strikedbhres, .(SPECIES_ID),function(df) lm(str_rate ~ sizeclass, weights=treesnr,data = df))
+# strip out model coefficients
+coefres<-ldply(models, coef)
+colnames(coefres)<-c("SPECIES_ID","Intercept","Slope")
+# place them into a dataframe
+lmdetails<-as.data.frame(matrix(NA,nrow=length(models),ncol=4))
+for(i in 1:length(models)){
+  cat("i = ",i)
+  lmdetails[i,1]<-attributes(models)[[2]][i,1]
+  if(length(summary(models[[i]])$residuals)>1)lmdetails[i,2]<-summary(models[[i]])$coefficients[2,4]
+  lmdetails[i,3]<-summary(models[[i]])$r.square
+  lmdetails[i,4]<-sum(models[[i]]$model$"(weights)")
+}
+colnames(lmdetails)<-c("SPECIES_ID","p-value","R-square","N")
+# create a reduced tree list for the regression coefficient table
+red_treelist<-treelist[,c("Species","ID","Scientific_name")]
+colnames(red_treelist)<-c("Species", "SPECIES_ID","Scientific name")
+# create the table
+lmdetails<-merge(lmdetails,coefres,all=T)
+lmdetails<-merge(lmdetails,red_treelist,by="SPECIES_ID", all.x=T)
+lmdetails<-lmdetails[,c("Species","N","Intercept","Slope","R-square","p-value")] 
+#need to keep "Species" in the above for the following figure
+write.csv(lmdetails,file=paste(workfolder,"/",resultsfolder,"/tables/Linear_regression.csv",sep=""),row.names=F)
+
+
+######################################################
+# Prepare the plots of strike rate vs DBH by species #
+######################################################
+
+#run this after LR table to use p-values from the table
+#using active sites only summarize by species and DBH (all active and inactive trees)
+activity.sites <-ddply(treesvlocation, .(PLOT_ID), summarize, siteactive=max(KFP_CONFIRMED))
+acttreesvlocation<-treesvlocation[treesvlocation$PLOT_ID %in% activity.sites$PLOT_ID[activity.sites$siteactive==1],]
+acttreesvlocation$sizeclass<-acttreesvlocation$DBH %/% 100 #this splits trees into classes by 100 (interesting:-))
+#summarize all trees by species by sizes across all active sites
+DBHspecificSR<-ddply(acttreesvlocation,.(Species, sizeclass),sumspeciesDBH=sum(counter), summarize)
+head(DBHspecificSR)
+#summarize active trees by species and sizes 
+acttreesDBH<-ddply(acttreesvlocation,.(Species,sizeclass),DBHspeciessum01=sum(KFP_CONFIRMED), summarize)
+DBHspecificSR$probability<-acttreesDBH$DBHspeciessum01/DBHspecificSR$sumspeciesDBH
+DBHspecificSR$Species<-as.character(DBHspecificSR$Species) 
+DBHspecificSR<-merge(lmdetails,DBHspecificSR, by = "Species")
+
+###########################################################
+# Prepare the plot of strike rate vs DBH over all species #
+###########################################################
+
+DBHsr<-ddply(acttreesvlocation,.(sizeclass),sumDBH=sum(counter), summarize)
+acttreesDBH_nospecies<-ddply(acttreesvlocation,.(sizeclass),DBHsum01=sum(KFP_CONFIRMED), summarize)
+DBHsr$probability<-acttreesDBH_nospecies$DBHsum01/DBHsr$sumDBH
+DBHplot<-qplot(x=sizeclass, y=probability,data=DBHsr)
+print(DBHplot +stat_smooth(method="lm",se=FALSE,aes(weight=sumDBH))+theme_classic()+xlab("Size class")+ylab("Strike rate")+theme(axis.text.x = element_text(size=10,color="black"),axis.text.y = element_text(size=14,color="black"),axis.title = element_text(size=14),title=element_text(size=14))+ xlim(0,(max(DBHsr$sizeclass)+1)))
+```
+
+
+```{r sizeSRspecies, fig.cap=figRef("sizeSR", "Relationships between tree size (DBH) and strike rate for each tree species."), echo=FALSE, warning=FALSE, fig.height=6, fig.width=8}
+SpeciesDBHplot<-qplot(x=sizeclass, y=probability,data=DBHspecificSR)
+print(SpeciesDBHplot +stat_smooth(method="lm",se=FALSE,aes(weight=sumspeciesDBH)) +facet_wrap(~Species, scales="free_x")+theme_classic()+xlab("Size class")+ylab("Strike rate")+theme(axis.text.x = element_text(size=10,color="black"),axis.text.y = element_text(size=04,color="black"),axis.title = element_text(size=14),title=element_text(size=14)))
+```
+
+
+```{r printsizeSRspecies, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+png(paste(workfolder,"/",resultsfolder,"/figures/sizeSRspecies.png",sep=""),width = 8, height=6, res = 300,units = "in")
+SpeciesDBHplot<-qplot(x=sizeclass, y=probability,data=DBHspecificSR)
+print(SpeciesDBHplot +stat_smooth(method="lm",se=FALSE,aes(weight=sumspeciesDBH)) +facet_wrap(~Species, scales="free_x")+theme_classic()+xlab("Size class")+ylab("Strike rate")+theme(axis.text.x = element_text(size=10,color="black"),axis.text.y = element_text(size=04,color="black"),axis.title = element_text(size=14),title=element_text(size=14)))
+dev.off()
+```
+
+
+```{r tab3, echo=FALSE, message=FALSE}
+set.caption(tabRef("regsum","Summary terms for linear regressions of strike rate on tree size for each tree species found at active sites weighted by the number of trees in each size class. Summary terms include the number of trees used in the regression (N), intercept and slope of the regression line, the R2 value and the p-value for the regression."))
+pander(lmdetails)
+```
+
+```{r sizeSRoverall, fig.cap=figRef("sizeSRoverall", "Relationships between tree size (DBH) and strike rate across all tree species."), echo=FALSE, warning=FALSE, fig.height=6, fig.width=8}
+DBHplot<-qplot(x=sizeclass, y=probability,data=DBHsr)
+print(DBHplot +stat_smooth(method="lm",se=FALSE,aes(weight=sumDBH))+theme_classic()+xlab("Size class")+ylab("Strike rate")+theme(axis.text.x = element_text(size=10,color="black"),axis.text.y = element_text(size=14,color="black"),axis.title = element_text(size=14),title=element_text(size=14))+ xlim(0,(max(DBHsr$sizeclass)+1)))
+```
+
+```{r printsizeSRoverall, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+png(paste(workfolder,"/",resultsfolder,"/figures/sizeSRspecies.png",sep=""),width = 8, height=6, res = 300,units = "in")
+DBHplot<-qplot(x=sizeclass, y=probability,data=DBHsr)
+print(DBHplot +stat_smooth(method="lm",se=FALSE,aes(weight=sumDBH))+theme_classic()+xlab("Size class")+ylab("Strike rate")+theme(axis.text.x = element_text(size=10,color="black"),axis.text.y = element_text(size=14,color="black"),axis.title = element_text(size=14),title=element_text(size=14))+ xlim(0,(max(DBHsr$sizeclass)+1)))
+dev.off()
+```
+
+
+
+# 5.) References
+Allen CD, Saxon M and McDougal K (2010). Koala surveys in the coastal forests of the Bermagui-Mumbulla area: 2007-09 - An interim report. NSW Office of Environment and Heritage PO Box 656 Merimbula NSW 2548.
+
+Biolink, (2011). Tweed Coast Koala Habitat Study. Report to Tweed Shire Council. Biolink Uki, NSW.
+Elith, J., Leathwick, J. R. and Hastie, T. (2008), A working guide to boosted regression trees. Journal of Animal Ecology, 77: 802-813.
+
+Gruber, B., Eckel, K., Everaars, J., Dormann, C.F. (2011). On managing the Red mason Bee (*Osmia bicornis*) in apple orchards. Apidologie 42: 564 - 576.
+
+Lechowicz MJ. (1982). The sampling characteristics of electivity indeces. Oecologia 52: 22-30
+
+Tulau, M.J. (1994). Soil Landscapes of the Cooma 1: 100,000 Sheet Report. Department of Conservation and Land Management incorporating the Soil Conservation Service of NSW, Sydney.
+
