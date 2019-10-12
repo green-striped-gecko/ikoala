@@ -81,7 +81,7 @@ suppressMessages(library(dplyr, quietly=TRUE, warn.conflicts=FALSE))
 suppressMessages(library(leaflet, quietly=TRUE, warn.conflicts=FALSE))
 suppressMessages(library(gplots, quietly=TRUE, warn.conflicts=FALSE))
 
-
+#webshot::install_phantomjs()
 #library(rgeos)
 
 
@@ -676,46 +676,47 @@ writeOGR(points.sites,dsn=file.path(params$results_folder,"sites"),overwrite_lay
 
 ```{r}
 #until I find a way to loop
+
 nnn <- 1
-if (nnn<=nperiods) maps[[nnn]]
+if (nnn<=nperiods & nperiods>1) maps[[nnn]]
 nnn <- nnn+1
 ```
 
 
 ```{r}
-if (nnn<=nperiods) maps[[nnn]]
+if (nnn<=nperiods & nperiods>1) maps[[nnn]]
 nnn <- nnn+1
 ```
 ```{r}
-if (nnn<=nperiods) maps[[nnn]]
+if (nnn<=nperiods & nperiods>1) maps[[nnn]]
 nnn <- nnn+1
 ```
 ```{r}
-if (nnn<=nperiods) maps[[nnn]]
+if (nnn<=nperiods & nperiods>1) maps[[nnn]]
 nnn <- nnn+1
 ```
 ```{r}
-if (nnn<=nperiods) maps[[nnn]]
+if (nnn<=nperiods & nperiods>1) maps[[nnn]]
 nnn <- nnn+1
 ```
 ```{r}
-if (nnn<=nperiods) maps[[nnn]]
+if (nnn<=nperiods & nperiods>1) maps[[nnn]]
 nnn <- nnn+1
 ```
 ```{r}
-if (nnn<=nperiods) maps[[nnn]]
+if (nnn<=nperiods & nperiods>1) maps[[nnn]]
 nnn <- nnn+1
 ```
 ```{r}
-if (nnn<=nperiods) maps[[nnn]]
+if (nnn<=nperiods & nperiods>1) maps[[nnn]]
 nnn <- nnn+1
 ```
 ```{r}
-if (nnn<=nperiods) maps[[nnn]]
+if (nnn<=nperiods & nperiods>1) maps[[nnn]]
 nnn <- nnn+1
 ```
 ```{r}
-if (nnn<=nperiods) maps[[nnn]]
+if (nnn<=nperiods & nperiods>1) maps[[nnn]]
 nnn <- nnn+1
 ```
 

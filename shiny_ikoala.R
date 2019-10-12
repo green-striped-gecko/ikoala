@@ -1,7 +1,12 @@
 library(DT)
 library(rhandsontable)
+library(shiny)
+library(shinyWidgets)
 shinyApp(
   ui = fluidPage(
+    setBackgroundImage(
+      src = "./ikoala_report_title2.png"
+    ),
     textInput(inputId = "report_name", "Report name:", "ikoala report"),
     selectizeInput(inputId = "database", label="Database: ", choices=list.files("database/", pattern = "accdb")),
     selectizeInput(inputId = "selperiod", label="Periods: ", choices=list.files("periods/", pattern = "csv")),
