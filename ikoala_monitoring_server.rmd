@@ -2,18 +2,21 @@
 title: '`r params$report_name`'
 author: "Bernd Gruber & Aaron Adamack - Version 0.54"
 date: '`r Sys.Date()`'
+always_allow_html: yes
 output:
   word_document:
+    
     fig_caption: yes
     reference_docx: styles.docx
 params:
   report_name: ikoala Coastal Koala Study Area
   database: database/GDA94z55Database2019May.accdb 
-  study_periods: periods/periods_ST.csv
-  study_site: sites/sites_numeralla.csv
+  study_periods_name: periods/periods_coastal.csv
+  study_periods: periods/periods_coastal.csv
+  study_site: sites/sites_coastalcore.csv
   restricted: site
   results_folder: results
-  max_distance: 501
+  max_distance: 250
   projection: +proj=utm +zone=55 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs
 ---
 ```{r global_options, include=FALSE}
@@ -23,6 +26,7 @@ options(scipen=10)  #important to not muddle up coordinates to e.g. 6e6
 
 ```{r}
 #This version of ikoala_monitoring.rmd can be run via a GUI ikoala_monitoring_GUI.r. In case you do not want to run it with the GUI you need to specify the input parameters above 
+
 ```
 
 
@@ -36,7 +40,7 @@ options(scipen=10)  #important to not muddle up coordinates to e.g. 6e6
 
 *  Report file name: `r params$report_name`
 *  Data base: `r params$database`
-*  Study periods file: `r params$study_periods`
+*  Study periods file: `r params$study_periods_name`
 *  Study site file: `r params$study_site`
 *  Projection: `r params$projection`
 *  max_distance:  `r params$max_distance`
@@ -74,6 +78,9 @@ suppressMessages(library(R2jags, quietly=TRUE, warn.conflicts=FALSE))
 suppressMessages(library(RODBC, quietly=TRUE, warn.conflicts=FALSE))
 suppressMessages(library(Hmisc, quietly=TRUE, warn.conflicts=FALSE))
 suppressMessages(library(dplyr, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(leaflet, quietly=TRUE, warn.conflicts=FALSE))
+suppressMessages(library(gplots, quietly=TRUE, warn.conflicts=FALSE))
+
 
 #library(rgeos)
 
@@ -147,7 +154,7 @@ options(tabcap.prefix = "Table", tabcap.sep = ":", tabcap.prefix.highlight = "**
 
 
 
-```{r, warning=TRUE}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 
 ##############################################################################################################
 # access database
@@ -163,7 +170,7 @@ treelist<-mdb.get(newdb,tables = "TREE_SPECIES", allow = "_", dateformat = '%d/%
 sitevisits<-mdb.get(newdb,tables = "SITE_VISITS", allow = "_", dateformat = '%d/%m/%y')
 #### core sites and periods need to be loaded!!!!
 
-defperiods <- read.csv(params$study_periods)
+if (params$study_periods==params$study_periods_name) defperiods <- read.csv(params$study_periods) else defperiods <- params$study_periods
 nperiods <- nrow(defperiods)
 
 if (nperiods > 1) {
@@ -187,9 +194,11 @@ if (nperiods>1) cat("An *ikoala* monitoring analysis is included because input f
 
 if (params$restricted=="site") cat(paste0("\n As restricted is switched to **site**, the detailed report is based on sites as defined by the file:", params$study_site," over all periods. \n"))
 
-if (!params$restricted=="region") cat(paste0("\n As restricted is switched to **region**, the detailed report is based on sites defined by the entry:", defperiods$region[1]," in the periods file (",params$study_periods,").\n "))
+if (params$restricted=="region") cat(paste0("\n As restricted is switched to **region**, the detailed report is based on sites defined by the entry:", defperiods$region[1]," in the periods file (",params$study_periods_name,").\n "))
 
 cat(paste0("Sites are included and moved to the next possible grid location if they occur within the specified maximum distance (",params$max_distance,"m) of the grid used in the monitoring survey."))
+
+
 
   
 ```
@@ -393,15 +402,22 @@ lonlat <- project(xy,proj = params$projection,  inv = TRUE)
 sites$lat <-lonlat[,2]
 sites$lon <- lonlat[,1]
 
-cols <- c("black","green")
-###intermediate solutions
-plot(sites$lon, sites$lat, asp=1, pch=16, col=cols[sites$activitykoalas+1]) 
+
+###leaflet solution
+cols <- col2hex(c("orange","green"))
+    cols <- substr(cols, 1, 7)
+    m <- leaflet() %>% addTiles() %>% addCircles(lng = sites$lon, 
+        lat = sites$lat,  color = cols[sites$activitykoalas+1], fillColor = cols[sites$activitykoalas+1], 
+        opacity = 1, radius=40) %>% addLegend("topright", colors=cols, labels=c("absent", "present"), title="Koalas")
+    m %>% addProviderTiles("Esri.WorldImagery")
+
+
+#plot(sites$lon, sites$lat, asp=1, pch=16, col=cols[sites$activitykoalas+1]) 
 
 #PlotOnStaticMap(newmap,lat = sites$lat, pch = 21, lon = sites$lon,  cex=1,  col="white", FUN = points, add=FALSE, bg=cols[sites$activitykoalas+1]) 
-legend("bottomleft", legend = c("absent","present"), pch=16, title = "", col=cols)
+#legend("bottomleft", legend = c("absent","present"), pch=16, title = "", col=cols)
 
 # Create a shapefile of the points...
-
 points.sites<-SpatialPointsDataFrame(coords=sites[,c("lon","lat")], sites[, c("x","y","PLOT_ID","activitykoalas","numact","numtrees","act" )])
 writeOGR(points.sites,dsn=file.path(params$results_folder,"sites"),overwrite_layer=TRUE,delete_dsn=TRUE,layer="sites_all", driver="ESRI Shapefile")
 
@@ -561,30 +577,35 @@ write.csv(site_dimensions,file=file.path(params$results_folder,"monitoring_site.
 
 ### Monitoring area.
 
-```{r sitemapcore2, fig.cap=figRef("sitemap32",paste0("Monitoring area. The monitoring area is defined by the sites listed in file: ", params$study_site," and consists of ",nrow(coresites)," sites." ) ) ,echo=FALSE, results='hide', message=FALSE, warning=FALSE, fig.width=5,fig.height=5}
+
+```{r}
+
 if (nperiods>1)
 {
-#############################################
-# Create a map of the study area #
-#############################################
-#newmap <- GetMap.bbox(lonR=c(lonmin, lonmax), latR=c(latmin, latmax), maptype="terrain") 
-
-  ###intermediate solutions
-plot(coresites$lon, coresites$lat, asp=1, pch=16) 
-
-  
-  
-#PlotOnStaticMap(newmap,lat = coresites$lat, pch = 21, lon = coresites$lon,  cex=1,  col="white", FUN = points, add=FALSE, bg="black") 
-# Create a shapefile of the points...
 points.sites<-SpatialPointsDataFrame(coords=coresites[,c("lon","lat")], coresites[, c("x","y")])
 writeOGR(points.sites,file.path(params$results_folder,"coresites"),overwrite_layer=TRUE, delete_dsn=TRUE,layer="core_sites", driver="ESRI Shapefile")
 
 }
 
+
 ```
 
 
+```{r sitemapcore2,fig.cap=figRef("sitemap32",paste0("Monitoring area. The monitoring area is defined by the sites listed in file: ", params$study_site_name," and consists of ",nrow(coresites)," sites." ) ) , fig.width=5,fig.height=5}
 
+if (nperiods>1)
+{
+#############################################
+# Create a map of the study area #
+#############################################
+###leaflet solution
+cols <- col2hex(c("lightgrey"))
+  cols <- substr(cols, 1, 7)
+  m <- leaflet() %>% addTiles() %>% addCircles(lng = coresites$lon, lat = coresites$lat,  color = cols, opacity = 1, radius=40) %>% addLegend("topright", colors=cols, labels=c("sites"), title="Monitoring sites")
+  m %>% addProviderTiles("Esri.WorldImagery")
+}
+
+```
 
 
 ### Summary tables per period
@@ -622,10 +643,9 @@ pander(tt)
 
 ### Mapped results per period
 
-The following figures show the grid-sites that were assessed in each monitoring period and thier presenece/absence results.
+The following figures show the grid-sites that were assessed in each monitoring period and their absence/presence results.
 
-
-```{r sitemap_per, echo=FALSE, results='hide', message=FALSE, warning=FALSE, fig.width=5,fig.height=5}
+```{r sitemap_per}
 #############################################
 # Create a map of the study area #
 #############################################
@@ -637,33 +657,66 @@ lonlat <- project(xy,proj = params$projection,  inv = TRUE)
 
 sites$lat <-lonlat[,2]
 sites$lon <- lonlat[,1]
-
-cols <- c("red","blue","darkgrey")
-
-
+ maps <- list()
 for (i in 1:nperiods)
 {
-  
-  
-#PlotOnStaticMap(newmap,lat = coresites$lat, pch = 16, lon = coresites$lon,  cex=1,  col="darkgrey", FUN = points, add=FALSE) 
+###leaflet solution
+cols <- col2hex(c("orange","green","darkgrey"))
+  cols <- substr(cols, 1, 7)
+  maps[[i]] <- leaflet() %>% addTiles() %>% addCircles(lng = coresites$lon, lat = coresites$lat,  color = cols[3], opacity = 1, radius=40) %>% addCircles(lng = sites$lon[sites$period==i], lat = sites$lat[sites$period==i],  color = cols[sites$activitykoalas[sites$period==i]+1], opacity = 1, radius=40) %>%    addLegend("topright", colors=cols, labels=c("absent","present", "not monitored"), title=paste("Period",i)) %>% addProviderTiles("Esri.WorldImagery")
 
-###intermediate solutions
-plot(coresites$lon, coresites$lat, asp=1, pch=16, col="darkgrey")   
-  
-legend("bottomleft", legend = c("absent","present"), pch=16, title = paste("Period",i), col=cols)
-   
-set.caption(paste0("Presence/absence map of the study area for period ",i,"." ) )
-plot(sites$lon[sites$period==i], sites$lat[sites$period==i], asp=1, pch=16, col=cols[sites$activitykoalas[sites$period==i]+1])   
-
-
-#PlotOnStaticMap(newmap,lat = sites$lat[sites$period==i], pch = 21, lon = sites$lon[sites$period==i],  cex=1,  col="white", FUN = points, add=TRUE, bg=cols[sites$activitykoalas[sites$period==i]+1]) 
-legend("bottomleft", legend = c("absent","present","not monitored"), pch=16, title = paste("Period",i), col=cols)
-
+#set.caption(paste0("Presence/absence map of the study area for period ",i,"." ) )
 # Create a shapefile of the points...
 points.sites<-SpatialPointsDataFrame(coords=sites[sites$period==i,c("lon","lat")], sites[sites$period==i, c("x","y","PLOT_ID","activitykoalas","numact","numtrees","act" )])
 writeOGR(points.sites,dsn=file.path(params$results_folder,"sites"),overwrite_layer=TRUE,delete_dsn=TRUE,layer=paste("sites_period",i,sep="_"), driver="ESRI Shapefile")
 }
 }
+```
+
+
+```{r}
+#until I find a way to loop
+nnn <- 1
+if (nnn<=nperiods) maps[[nnn]]
+nnn <- nnn+1
+```
+
+
+```{r}
+if (nnn<=nperiods) maps[[nnn]]
+nnn <- nnn+1
+```
+```{r}
+if (nnn<=nperiods) maps[[nnn]]
+nnn <- nnn+1
+```
+```{r}
+if (nnn<=nperiods) maps[[nnn]]
+nnn <- nnn+1
+```
+```{r}
+if (nnn<=nperiods) maps[[nnn]]
+nnn <- nnn+1
+```
+```{r}
+if (nnn<=nperiods) maps[[nnn]]
+nnn <- nnn+1
+```
+```{r}
+if (nnn<=nperiods) maps[[nnn]]
+nnn <- nnn+1
+```
+```{r}
+if (nnn<=nperiods) maps[[nnn]]
+nnn <- nnn+1
+```
+```{r}
+if (nnn<=nperiods) maps[[nnn]]
+nnn <- nnn+1
+```
+```{r}
+if (nnn<=nperiods) maps[[nnn]]
+nnn <- nnn+1
 ```
 
 ### Estimated occupancy over time and probability of detection
@@ -869,7 +922,7 @@ pander(tab.entries)
 
 
 
-```{r activity_point_map, fig.cap=figRef("activity_point_map", "Site-specific koala activity levels and derived activity contours"), echo=FALSE, results='hide', message=FALSE, warning=FALSE, fig.width=6, fig.height=6}
+```{r}
 # grab a new map
 
 #  activemap <- GetMap.bbox(lonR=c(lonmin, lonmax), latR=c(latmin, latmax), maptype="satellite") 
@@ -881,27 +934,33 @@ contours<-contourLines(activitycontour, nlevels=6, levels=c(seq(1,16,3)/30))
 
 # build colour bar and data set for the activity plots
 cols<-rep(NA,7)
-cols[1]<-"gray60"
+cols[1]<-"#AAAAAA"
 cols[2:7]<-brewer.pal(6,"OrRd")
 activity.legendtext<-c("0", paste(seq(1,16,3),"-",seq(3,18,3),sep=" ")) 
 
 # plot points first
 ###intermediate solution
-plot(sites$lon, sites$lat,pch=16, asp=1, col=cols[ceiling(sites$numact/3)+1])
+#plot(sites$lon, sites$lat,pch=16, asp=1, col=cols[ceiling(sites$numact/3)+1])
+
+###leaflet solution
+  cols <- substr(cols, 1, 7)
+  maps <- leaflet() %>% addTiles() %>% addCircles(lng = sites$lon, lat = sites$lat,  color = cols[ceiling(sites$numact/3)+1], opacity = 1, radius=40)  %>%    addLegend("bottomright", colors=cols, labels=activity.legendtext, title="Koala activity") %>% addProviderTiles("Esri.WorldImagery")
+
+
 
 
 #PlotOnStaticMap(activemap, lat = sites$lat, lon = sites$lon, pch = 16, col =cols[ceiling(sites$numact/3)+1], add = FALSE, FUN = points, cex=0.6)
-legend("bottomright", legend = activity.legendtext, pch=16, col=cols, bg = "grey", title = "Koala activity", cex= 0.8)
+#legend("bottomright", legend = activity.legendtext, pch=16, col=cols, bg = "grey", title = "Koala activity", cex= 0.8)
 
 #then contours
 for (i in 1:length(contours))
 {
   cc2 <- ceiling(contours[[i]]$level*10)#/mc *10
-  lines(contours[[i]]$x, contours[[i]]$y, lwd=2, col=cols[cc2+1])
+  #lines(contours[[i]]$x, contours[[i]]$y, lwd=2, col=cols[cc2+1])
   #PlotOnStaticMap(activemap, lon = contours[[i]]$x, 
    #               lat =contours[[i]]$y, 
     #              lwd=2,col=cols[cc2+1], FUN = lines, add=TRUE)
-
+ maps <- maps %>% addPolylines(lat=contours[[i]]$y, lng = contours[[i]]$x, color = cols[cc2+1], opacity = 1)
   
   }       
 
@@ -920,6 +979,11 @@ cat(showWKT("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"), file=file.path(
 
 
 ```
+
+```{r activity_point_map, fig.cap=figRef("activity_point_map", "Site-specific koala activity levels and derived activity contours"), echo=FALSE, results='hide', message=FALSE, warning=FALSE, fig.width=6, fig.height=6}
+maps
+```
+
 
 
 ```{r printactivity_point_map, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
