@@ -1,6 +1,6 @@
 ---
 title: '`r params$report_name`'
-author: "Bernd Gruber & Aaron Adamack - Version 0.54"
+author: "Bernd Gruber & Aaron Adamack - Version 0.62"
 date: '`r Sys.Date()`'
 always_allow_html: yes
 output:
@@ -11,12 +11,11 @@ output:
 params:
   report_name: ikoala Coastal Koala Study Area
   database: database/GDA94z55Database2019May.accdb 
-  study_periods_name: periods/periods_coastal.csv
-  study_periods: periods/periods_coastal.csv
-  study_site: sites/sites_coastalcore.csv
-  restricted: site
+  study_periods: periods/periods_ST.csv
+  report_type: monitoring
+  study_site: sites/sites_coastal_1.csv
+  study_area: Southern Tablelands
   results_folder: results
-  max_distance: 250
   projection: +proj=utm +zone=55 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs
 ---
 ```{r global_options, include=FALSE}
@@ -39,18 +38,16 @@ options(scipen=10)  #important to not muddle up coordinates to e.g. 6e6
 **Input files**
 
 *  Report file name: `r params$report_name`
+*  Report type: `r params$report_type`
 *  Data base: `r params$database`
-*  Study periods file: `r params$study_periods_name`
+*  Study periods file: `r params$study_periods`
 *  Study site file: `r params$study_site`
+*  Study area: `r params$study_area`
 *  Projection: `r params$projection`
-*  max_distance:  `r params$max_distance`
-*  resticted: `r params$restricted`
 
 **Output folder (containing tables, images and maps)**
 
 *  Results folder: `r params$results_folder`
-
-
 
 ```{r initialize, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
 #This section installs and loads all of the R-packages you need to run the report.... 
@@ -154,7 +151,7 @@ options(tabcap.prefix = "Table", tabcap.sep = ":", tabcap.prefix.highlight = "**
 
 
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
 
 ##############################################################################################################
 # access database
@@ -163,44 +160,41 @@ options(tabcap.prefix = "Table", tabcap.sep = ":", tabcap.prefix.highlight = "**
 newdb <- params$database
 
 # retrieve data from database  
-
 locations<- mdb.get(newdb,tables = "LOCATIONS", allow = "_", dateformat = '%d/%m/%y') #load location data
 trees <-  mdb.get(newdb,tables = "TREE_MASTER", allow = "_", dateformat = '%d/%m/%y') 
 treelist<-mdb.get(newdb,tables = "TREE_SPECIES", allow = "_", dateformat = '%d/%m/%y')
 sitevisits<-mdb.get(newdb,tables = "SITE_VISITS", allow = "_", dateformat = '%d/%m/%y')
-#### core sites and periods need to be loaded!!!!
 
-if (params$study_periods==params$study_periods_name) defperiods <- read.csv(params$study_periods) else defperiods <- params$study_periods
+
+#check if monitoring or general report
+#read periods
+defperiods <- read.csv(params$study_periods) 
 nperiods <- nrow(defperiods)
 
-if (nperiods > 1) {
+#### core sites and periods need to be loaded for monitoring report!!!!
+if (params$report_type=="monitoring") {
   coresites <- read.csv(params$study_site)
   coresites$gridcoords <- paste(as.character(coresites$x), as.character(coresites$y), sep="-")
-  
-  } else coresites <- NULL
-
+  } else {  #if general report only on the first period!!!
+    coresites <- NULL
+    defperiods <- defperiods[1,]
+    nperiods <- 1
+}
 ```
 
 **Report content summary**
 
 This is an automatically generated report of koala occurrence, activity and tree species preference analysis for specified sampling period/s and region.
 
-
 ```{r, results="asis"}
-if (nperiods==1) cat("**The input contains only one defined study period, therefore a detailed ikoala report for that period will be created, but no monitoring report.** \n")
 
-if (nperiods>1) cat("An *ikoala* monitoring analysis is included because input from more than one survey period is specified in the study periods file.  \n")
-
-
-if (params$restricted=="site") cat(paste0("\n As restricted is switched to **site**, the detailed report is based on sites as defined by the file:", params$study_site," over all periods. \n"))
-
-if (params$restricted=="region") cat(paste0("\n As restricted is switched to **region**, the detailed report is based on sites defined by the entry:", defperiods$region[1]," in the periods file (",params$study_periods_name,").\n "))
-
-cat(paste0("Sites are included and moved to the next possible grid location if they occur within the specified maximum distance (",params$max_distance,"m) of the grid used in the monitoring survey."))
+if (params$report_type=="monitoring") cat("An *ikoala* monitoring report is created. Please be aware that there need to be at least two periods defined and sites are taken from the provided sites file.\n")
 
 
+if (params$report_type=="monitoring") cat(paste0("All sites within the grid defined by the sites file: ", params$study_site," are included", params$study_site,".\n"))
 
-  
+if (params$report_type=="general") cat("An *ikoala* general report for a single period (first period only) is created. Sites are selected based on the entry in the column STUDY_AREA that are matching ",params$study_area," (as defined by the parameter study_site). Please ignore heading and explanations related to the monitoring report.\n")
+
 ```
 
 
@@ -216,7 +210,6 @@ locations<-locations[,c("LOCATION_ID","PLANNED_EASTING","PLANNED_NORTHING","LATI
 
 keep<-c("SITE_VISIT_ID","LOCATION_ID","S_EASTINGS","S_NORTHINGS","A_LEVEL","VISITED_SITE","DATE_SURVEYED","STUDY_AREA","GEOLOGY","SOIL_TYPE")
 sitevisits<-sitevisits[,(names(sitevisits) %in% keep)]
-
 
 # now clean up the tree data...
 treedrop<-c("ID","GGFP_CONFIRMED","COMMENTS","SCAT AGE","BARK CHEWING")
@@ -239,18 +232,25 @@ names(treelist)[grep("ID$",names(treelist))]<-"TREE_SPECIES_ID"
 treelist<-treelist[,c("SPECIES","TREE_SPECIES_ID","SCIENTIFIC_NAME","COMMON_NAME")]
 treelist<-treelist[treelist$SPECIES!="Blank", ] #remove species ID blank
 
-
 ```
 ```{r}
 ###define function occdata (filter data and create 3x10 histories)
 
 
-occdata <- function(filter, loctrees, from=NA, to=NA, nJ=5 )
+occdatamon <- function(loctrees, from=NA, to=NA, nJ=5 )
   
 {
-study<-loctrees[loctrees$STUDY_AREA==filter ,]
+### calculate convex hull and get all sites within!!!
+pts <- SpatialPoints(cbind(loctrees$PLANNED_EASTING, loctrees$PLANNED_NORTHING))
+ch <- chull(coresites$x, coresites$y)  
+chxy <- Polygon(cbind(coresites$x[ch], coresites$y[ch]))
+index <- !is.na(over(pts,SpatialPolygons(list(Polygons(list(chxy),1)))))
+
+  
+  
+study<-loctrees[index ,]
 study <- study[!is.na(study$SITE_VISIT_ID),]  #get rid of NAs in VISIT_ID
-study$year <- as.numeric(substr(strptime(study$DATE_SURVEYED, format = "%d/%m/%y"),1,4))
+study$year <- as.numeric(substr(strptime(study$DATE_SURVEYED, format = "%m/%d/%y"),1,4))
 study <- study[!is.na(study$year),]  #get rid of NAs in VISIT_ID
 
 if (from) study <-  study[study$year >=from & study$year<=to,]
@@ -286,7 +286,24 @@ cap <- ifelse(cap>0,1,0)
 
 capdata <-cbind(studyact, data.frame(cap))
 
-return (capdata)
+return (list(sta=capdata, st=study))
+}
+
+
+occdatagen <- function(filter, loctrees, from=NA, to=NA, nJ=5 )
+  
+{
+#select for filter and 
+study <- loctrees[loctrees$STUDY_AREA==filter,]
+study <- study[!is.na(study$SITE_VISIT_ID),]  #get rid of NAs in VISIT_ID
+study$year <- as.numeric(substr(strptime(study$DATE_SURVEYED, format = "%m/%d/%y"),1,4))
+study <- study[!is.na(study$year),]  #get rid of NAs in VISIT_ID
+
+if (from) study <-  study[study$year >=from & study$year<=to,]
+studyact<-ddply(study, .(SITE_VISIT_ID), summarize, activity01=max(0,KFP,na.rm=TRUE), numact=sum(KFP,na.rm=TRUE),numtrees=length(SITE_VISIT_ID), x=mean(`PLANNED_EASTING`, na.rm=T), y=mean(`PLANNED_NORTHING`, na.rm=T))
+studyact$act<-studyact$numact/studyact$numtrees
+studyact$SITE_VISIT_ID <- factor(studyact$SITE_VISIT_ID)
+return(list(sta=studyact,st=study ) )
 }
 
 ```
@@ -295,25 +312,27 @@ return (capdata)
 ```{r}
 ### define sampling data 
 # via filters (time and region)
-#if moni
-
+#if monitoring otherwise define sites by data base entry!!!!
+if (params$report_type=="monitoring")
+{
 nJ=3
 sites <- NA
 for (i in 1:nperiods)
 {  
-per1occ <-occdata(filter = as.character(defperiods$region[i]),loctrees = loctrees, from=defperiods$from[i], to =defperiods$to[i],  nJ = nJ ) 
+dummy <-occdatamon(loctrees = loctrees, from=defperiods$from[i], to =defperiods$to[i],  nJ = nJ ) 
+per1occ <- dummy$sta
 koac1 <- per1occ
 koac1$period <- i
 if (i==1) sites <- koac1 else sites <- rbind(sites, koac1)
 }
+study <- dummy$st   #keep the study request for strike rates etc.
 colnames(sites)<- c("PLOT_ID","activitykoalas","numact", "numtrees", "x","y","act",paste0("X",1:nJ), "period")
 sites$gridcoords <- paste(as.character(sites$x), as.character(sites$y), sep="-")
 
 
-
-if (params$restricted=="site" & !is.null(coresites))
+#all sites not on the grid are removed!!!
+if (params$report_type=="monitoring")
 {
-  
 remove <- rep(FALSE, nrow(sites))
 for (i in 1:nrow(sites))
 {
@@ -321,7 +340,7 @@ for (i in 1:nrow(sites))
   dd <- as.matrix(dist(rbind(cbind(sites$x[i], sites$y[i]),cbind(coresites$x, coresites$y))))
   diag(dd)<-NA
   mind <- min(dd[1,], na.rm=T)
-  if (mind>params$max_distance) 
+  if (mind>50) 
   {
      remove[i] <- TRUE
   }
@@ -329,9 +348,17 @@ for (i in 1:nrow(sites))
 }
 sites <- sites[!remove, ]
 }
+} #end if monitoring
 
+if (params$report_type=="general")
+{
+dummy <- occdatagen(filter=as.character(params$study_area), loctrees = loctrees, from=defperiods$from[1], to=defperiods$to[1])  
+study <- dummy$st
+sites <- dummy$sta
+colnames(sites)<- c("PLOT_ID","activitykoalas","numact", "numtrees", "x","y","act")
+sites$gridcoords <- paste(as.character(sites$x), as.character(sites$y), sep="-")
 
-
+}
 ```
 
 
@@ -484,22 +511,22 @@ if (nperiods>1)
 {
 #all sites which are not on the core site grid
 #move if not further away than 500 meter?  
-for (i in 1:nrow(sites))
-{
-  if (!(sites$gridcoords[i] %in% coresites$gridcoords)) {
-  dd <- as.matrix(dist(rbind(cbind(sites$x[i], sites$y[i]),cbind(coresites$x, coresites$y))))
-  diag(dd)<-NA
-  mind <- min(dd[1,], na.rm=T)
-  if (mind<=params$max_distance) 
-  {
-     index <- which.min(dd[1,])  
-     sites$x[i]<- coresites$x[index]
-     sites$y[i] <- coresites$y[index]
-  }
-  }
-}
-## update gridcoords  
-sites$gridcoords <- paste(as.character(sites$x), as.character(sites$y), sep="-")
+# for (i in 1:nrow(sites))
+# {
+#   if (!(sites$gridcoords[i] %in% coresites$gridcoords)) {
+#   dd <- as.matrix(dist(rbind(cbind(sites$x[i], sites$y[i]),cbind(coresites$x, coresites$y))))
+#   diag(dd)<-NA
+#   mind <- min(dd[1,], na.rm=T)
+#   if (mind<=params$max_distance) 
+#   {
+#      index <- which.min(dd[1,])  
+#      sites$x[i]<- coresites$x[index]
+#      sites$y[i] <- coresites$y[index]
+#   }
+#   }
+# }
+# ## update gridcoords  
+# sites$gridcoords <- paste(as.character(sites$x), as.character(sites$y), sep="-")
 #sum over repeated visits at a site
 #more than once in a period....
 for (ii in 1:nperiods)
@@ -1028,20 +1055,22 @@ One measure for comparing the study area’s koalas’ tree species preferences 
 ##############################################################################
 # This section is doing the preliminary calculations for strike rate figures #
 ##############################################################################
-
-filter <- as.character(defperiods$region[1])
-from <- min(defperiods$from)
-to <- max(defperiods$to)
-
-study<-loctrees[loctrees$STUDY_AREA==filter ,]
-study <- study[!is.na(study$SITE_VISIT_ID),]  #get rid of NAs in VISIT_ID
-study$year <- as.numeric(substr(strptime(study$DATE_SURVEYED, format = "%d/%m/%y"),1,4))
-study <- study[!is.na(study$year),]  #get rid of NAs in VISIT_ID
-
-if (from) study <-  study[study$year >=from & study$year<=to,]
-  
-
-if (params$restricted=="site") study <- study[study$SITE_VISIT_ID %in% sites$PLOT_ID,]
+#study is now kept and no need to recalculate again.
+#study for monitoring: all sites within the area (hull)
+#study for general: all sites in the database
+# filter <- as.character(defperiods$region[1])
+# from <- min(defperiods$from)
+# to <- max(defperiods$to)
+# 
+# study<-loctrees[loctrees$STUDY_AREA==filter ,]
+# study <- study[!is.na(study$SITE_VISIT_ID),]  #get rid of NAs in VISIT_ID
+# study$year <- as.numeric(substr(strptime(study$DATE_SURVEYED, format = "%m/%d/%y"),1,4))
+# study <- study[!is.na(study$year),]  #get rid of NAs in VISIT_ID
+# 
+# if (from) study <-  study[study$year >=from & study$year<=to,]
+#   
+# 
+# if (params$restricted=="site") study <- study[study$SITE_VISIT_ID %in% sites$PLOT_ID,]
 
 treesvlocation <- join(study, treelist, by="TREE_SPECIES_ID")
 treesvlocation <- treesvlocation[!is.na(treesvlocation$SPECIES),]
