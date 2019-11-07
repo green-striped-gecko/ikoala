@@ -11,10 +11,10 @@ output:
 params:
   report_name: ikoala Coastal Koala Study Area
   database: database/GDA94z55Database2019May.accdb 
-  study_periods: periods/periods_ST.csv
+  study_periods: periods/periods.csv
   report_type: monitoring
-  study_site: sites/sites_coastal_1.csv
-  study_area: Southern Tablelands
+  study_site: sites/sites_coastal_4.csv
+  study_area: Coastal
   results_folder: results
   projection: +proj=utm +zone=55 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs
 ---
@@ -646,7 +646,8 @@ tt  <-table(sites$activitykoalas, sites$period)
 tt <- addmargins(tt, margin = 1)
 tt[3,]<- nrow(coresites)-tt[3,]
 rownames(tt)<- c("absent","present","not monitored")
-colnames(tt)<- c(paste("Period",1:nperiods))
+
+colnames(tt)<- c(paste("Period",colnames(tt)))
 tt <- addmargins(tt, margin=1)
 set.caption(tabRef("totmon",paste0("Summary of occurences of koalas per study period within the monitoring site. Please note that sites within ", params$max_distance," were moved to corrosponding monitoring sites. Sites visited more than once during a period were combinded into one observation.")))
 pander(tt)
@@ -660,7 +661,7 @@ if (nperiods>1) {
 tt  <-table(sites$activitykoalas, sites$period)
 tt <- round(tt/rep(colSums(tt), each=2)*100,0)
 rownames(tt)<- c("absent [%]","present [%]")
-colnames(tt)<- c(paste("Period",1:nperiods))
+colnames(tt)<- c(paste("Period",colnames(tt)))
 tt <- addmargins(tt, margin=1)
 set.caption(tabRef("perocc2","Percentage of occurrences of koalas per study period"))
 pander(tt)
@@ -694,8 +695,10 @@ cols <- col2hex(c("orange","green","darkgrey"))
 
 #set.caption(paste0("Presence/absence map of the study area for period ",i,"." ) )
 # Create a shapefile of the points...
-points.sites<-SpatialPointsDataFrame(coords=sites[sites$period==i,c("lon","lat")], sites[sites$period==i, c("x","y","PLOT_ID","activitykoalas","numact","numtrees","act" )])
+if (sum(sites$period==i)>0){
+  points.sites<-SpatialPointsDataFrame(coords=sites[sites$period==i,c("lon","lat")], sites[sites$period==i, c("x","y","PLOT_ID","activitykoalas","numact","numtrees","act" )])
 writeOGR(points.sites,dsn=file.path(params$results_folder,"sites"),overwrite_layer=TRUE,delete_dsn=TRUE,layer=paste("sites_period",i,sep="_"), driver="ESRI Shapefile")
+}
 }
 }
 ```
@@ -857,6 +860,13 @@ tab <- out$BUGSoutput$summary
 nam <- rownames(tab)
 
 tt <-table(sites$activitykoalas, sites$period)
+
+mm <- matrix(0, ncol=nperiods, nrow=2)
+rownames(mm)<- rownames(tt)
+mm[,as.numeric(colnames(tt))]<- tt
+
+tt <- mm
+
 
 total <- colSums(tt)
 presn <- tt[2,]
@@ -1056,21 +1066,23 @@ One measure for comparing the study area’s koalas’ tree species preferences 
 # This section is doing the preliminary calculations for strike rate figures #
 ##############################################################################
 #study is now kept and no need to recalculate again.
-#study for monitoring: all sites within the area (hull)
-#study for general: all sites in the database
-# filter <- as.character(defperiods$region[1])
-# from <- min(defperiods$from)
-# to <- max(defperiods$to)
-# 
-# study<-loctrees[loctrees$STUDY_AREA==filter ,]
-# study <- study[!is.na(study$SITE_VISIT_ID),]  #get rid of NAs in VISIT_ID
-# study$year <- as.numeric(substr(strptime(study$DATE_SURVEYED, format = "%m/%d/%y"),1,4))
-# study <- study[!is.na(study$year),]  #get rid of NAs in VISIT_ID
-# 
-# if (from) study <-  study[study$year >=from & study$year<=to,]
-#   
-# 
-# if (params$restricted=="site") study <- study[study$SITE_VISIT_ID %in% sites$PLOT_ID,]
+
+
+if (params$report_type=="monitoring")
+{
+  pts <- SpatialPoints(cbind(loctrees$PLANNED_EASTING, loctrees$PLANNED_NORTHING))
+ch <- chull(coresites$x, coresites$y)  
+chxy <- Polygon(cbind(coresites$x[ch], coresites$y[ch]))
+index <- !is.na(over(pts,SpatialPolygons(list(Polygons(list(chxy),1)))))
+study<-loctrees[index ,]
+study <- study[!is.na(study$SITE_VISIT_ID),]  #get rid of NAs in VISIT_ID
+}
+if (params$report_type=="general")
+{
+study <- loctrees[loctrees$STUDY_AREA==params$study_area,]
+study <- study[!is.na(study$SITE_VISIT_ID),]  #get rid of NAs in VISIT_ID
+}
+
 
 treesvlocation <- join(study, treelist, by="TREE_SPECIES_ID")
 treesvlocation <- treesvlocation[!is.na(treesvlocation$SPECIES),]

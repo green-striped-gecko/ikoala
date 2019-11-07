@@ -16,8 +16,8 @@ shinyApp(
     selectizeInput(inputId = "selsites", label="Sites: ", choices=list.files("sites/", pattern = "csv")),
     selectizeInput(inputId = "selstudyarea", label="Study area:", choices=c("Coastal","Southern Tablelands","Palerang", "Kooraban/Gulaga","Yurammie","Escarpment/Hinterlands", "Tantawangalo","Escarpment/Hinterland","Strzelecki Ranges", "Bermagui","Devils Holes","Southern tablelands","Hinterland")),
     h5(strong('Periods')),
-    p('for "general" exactly ',strong('one'),' period'), 
-    p('for monitoring at least ',strong('two'),' periods.'),
+    shiny::p('for "general" exactly ',strong('one'),' period'), 
+    shiny::p('for monitoring at least ',strong('two'),' periods.'),
     rHandsontableOutput('table'),
     selectizeInput(inputId = "selperiod", label="Periods: ", choices=list.files("periods/", pattern = "csv")),
     
