@@ -18,15 +18,17 @@ params:
   results_folder: results
   projection: +proj=utm +zone=55 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs
 ---
+
+```{r}
+#This version of ikoala_monitoring.rmd can be run via a GUI shiny_ikoala_R. In case you do not want to run it with the GUI you need to specify the input parameters above. Make sure there are no typos and parameters are "sensible" as otherwise this may result in a crash of the script.
+```
+
+
 ```{r global_options, include=FALSE}
 knitr::opts_chunk$set(fig.path=params$results_folder, dev='png', echo=FALSE,warning=FALSE, message=FALSE, cache = FALSE)
 options(scipen=10)  #important to not muddle up coordinates to e.g. 6e6 
 ```
 
-```{r}
-#This version of ikoala_monitoring.rmd can be run via a GUI ikoala_monitoring_GUI.r. In case you do not want to run it with the GUI you need to specify the input parameters above 
-
-```
 
 
 ![](images/ikoala_report_title.png)
@@ -1081,6 +1083,12 @@ if (params$report_type=="general")
 {
 study <- loctrees[loctrees$STUDY_AREA==params$study_area,]
 study <- study[!is.na(study$SITE_VISIT_ID),]  #get rid of NAs in VISIT_ID
+study$year <- as.numeric(substr(strptime(study$DATE_SURVEYED, format = "%m/%d/%y"),1,4))
+study <- study[!is.na(study$year),]  #get rid of NAs in VISIT_ID
+from <- defperiods[1,1]
+to <- defperiods[1,2]
+if (from) study <-  study[study$year >=from & study$year<=to,]
+if (nrow(study==0)) warning("There are now sites visited in the specified period, hence the report may not finish!!!!")
 }
 
 

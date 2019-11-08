@@ -72,7 +72,7 @@ shinyApp(
         # Knit the document, passing in the `params` list, and eval it in a
         # child of the global environment (this isolates the code in the document
         # from the code in this app).
-        #print(params)
+        print(params)
         #write periods to tempfile (only one string can be passed to YAML)
         write.csv(hot_to_r(input$table), "./periods/periods.csv", row.names = F)
         rmarkdown::render("ikoala_monitoring_server.rmd", output_file = file,params=params,
