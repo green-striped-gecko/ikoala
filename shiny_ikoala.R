@@ -1,3 +1,8 @@
+#### ikoala ###### To start click on "RunApp"
+#### in case the app does not start, please quit the session ####
+
+
+
 library(DT)
 library(rhandsontable)
 library(shiny)
