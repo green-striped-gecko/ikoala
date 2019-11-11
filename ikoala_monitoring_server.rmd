@@ -1,6 +1,6 @@
 ---
 title: '`r params$report_name`'
-author: "Bernd Gruber & Aaron Adamack - Version 0.62"
+author: "Bernd Gruber & Aaron Adamack - Version 0.77"
 date: '`r Sys.Date()`'
 always_allow_html: yes
 output:
@@ -418,14 +418,14 @@ The study area name/s in database and specified survey periods are provided in `
   
 ```{r ptable }
 per <- data.frame(period=1:nperiods, defperiods)
-set.caption(tabRef("pertable", "Study area name in database and survey period(s)"))
+set.caption(tabRef("pertable", "Survey period(s)"))
 pander(per)
 
 ```
 
 
 
-#2. Study area and occurence results
+# 2. Study area and occurence results
 
 
 `r figRef("sitemap")`, below, shows the study area, the grid-sites assessed and presence/absence results for all periods.
