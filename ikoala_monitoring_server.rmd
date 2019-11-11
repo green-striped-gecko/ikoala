@@ -13,13 +13,13 @@ params:
   database: database/GDA94z55Database2019May.accdb 
   study_periods: periods/periods.csv
   report_type: monitoring
-  study_site: sites/sites_coastal_4.csv
+  study_site: sites/sites_coastalcore.csv
   study_area: Coastal
   results_folder: results
   projection: +proj=utm +zone=55 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs
 ---
 
-```{r}
+```{r, echo=FALSE}
 #This version of ikoala_monitoring.rmd can be run via a GUI shiny_ikoala_R. In case you do not want to run it with the GUI you need to specify the input parameters above. Make sure there are no typos and parameters are "sensible" as otherwise this may result in a crash of the script.
 ```
 
@@ -79,7 +79,7 @@ suppressMessages(library(Hmisc, quietly=TRUE, warn.conflicts=FALSE))
 suppressMessages(library(dplyr, quietly=TRUE, warn.conflicts=FALSE))
 suppressMessages(library(leaflet, quietly=TRUE, warn.conflicts=FALSE))
 suppressMessages(library(gplots, quietly=TRUE, warn.conflicts=FALSE))
-
+suppressMessages(library(dismo, quietly=TRUE, warn.conflicts=FALSE))
 #webshot::install_phantomjs()
 #library(rgeos)
 
@@ -153,7 +153,7 @@ options(tabcap.prefix = "Table", tabcap.sep = ":", tabcap.prefix.highlight = "**
 
 
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+```{r db_retrieve, echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
 
 ##############################################################################################################
 # access database
@@ -188,7 +188,7 @@ if (params$report_type=="monitoring") {
 
 This is an automatically generated report of koala occurrence, activity and tree species preference analysis for specified sampling period/s and region.
 
-```{r, results="asis"}
+```{r contentsummary, results="asis"}
 
 if (params$report_type=="monitoring") cat("An *ikoala* monitoring report is created. Please be aware that there need to be at least two periods defined and sites are taken from the provided sites file.\n")
 
@@ -203,7 +203,7 @@ if (params$report_type=="general") cat("An *ikoala* general report for a single 
 
 
 
-```{r}
+```{r preparing_data}
 # Preparing data
 ##############################################################################################################
 #first have to rename ID in locations...
@@ -311,7 +311,7 @@ return(list(sta=studyact,st=study ) )
 ```
 
 
-```{r}
+```{r findstudy}
 ### define sampling data 
 # via filters (time and region)
 #if monitoring otherwise define sites by data base entry!!!!
@@ -327,35 +327,47 @@ koac1 <- per1occ
 koac1$period <- i
 if (i==1) sites <- koac1 else sites <- rbind(sites, koac1)
 }
-study <- dummy$st   #keep the study request for strike rates etc.
+#study <- dummy$st   #keep the study request for strike rates etc.
 colnames(sites)<- c("PLOT_ID","activitykoalas","numact", "numtrees", "x","y","act",paste0("X",1:nJ), "period")
+
+#all sites not on the grid are moved to a site on the grid!!!
+#voroni tesselation    
+xy <- SpatialPoints(cbind(sites$x, sites$y))
+vv <-  voronoi(cbind(coresites$x, coresites$y)) 
+oo <- over(xy, vv)
+
+
+#move all sites first, then make the unique
+  ncoord <- coresites[oo$id,1:2]
+  sites$x <- ncoord$x
+  sites$y <- ncoord$y
+
 sites$gridcoords <- paste(as.character(sites$x), as.character(sites$y), sep="-")
 
+#aggreate duplicated sites to a unique value (we take max of all)
+sites <- ddply(sites, .(gridcoords, period), summarise, PLOT_ID = PLOT_ID[1], activitykoalas=max(activitykoalas), numact=max(numact), numtrees=max(numtrees), x=unique(x), y=unique(y), act=max(act), X1=max(X1), X2=max(X2), X3=max(X3))
+  
+# remove <- rep(FALSE, nrow(sites))
+# for (i in 1:nrow(sites))
+# {
+#   if (!(sites$gridcoords[i] %in% coresites$gridcoords)) {
+#   dd <- as.matrix(dist(rbind(cbind(sites$x[i], sites$y[i]),cbind(coresites$x, coresites$y))))
+#   diag(dd)<-NA
+#   mind <- min(dd[1,], na.rm=T)
+#   if (mind>50) 
+#   {
+#      remove[i] <- TRUE
+#   }
+#   }
+# }
+# sites <- sites[!remove, ]
 
-#all sites not on the grid are removed!!!
-if (params$report_type=="monitoring")
-{
-remove <- rep(FALSE, nrow(sites))
-for (i in 1:nrow(sites))
-{
-  if (!(sites$gridcoords[i] %in% coresites$gridcoords)) {
-  dd <- as.matrix(dist(rbind(cbind(sites$x[i], sites$y[i]),cbind(coresites$x, coresites$y))))
-  diag(dd)<-NA
-  mind <- min(dd[1,], na.rm=T)
-  if (mind>50) 
-  {
-     remove[i] <- TRUE
-  }
-  }
-}
-sites <- sites[!remove, ]
-}
 } #end if monitoring
 
 if (params$report_type=="general")
 {
 dummy <- occdatagen(filter=as.character(params$study_area), loctrees = loctrees, from=defperiods$from[1], to=defperiods$to[1])  
-study <- dummy$st
+#study <- dummy$st
 sites <- dummy$sta
 colnames(sites)<- c("PLOT_ID","activitykoalas","numact", "numtrees", "x","y","act")
 sites$gridcoords <- paste(as.character(sites$x), as.character(sites$y), sep="-")
@@ -759,7 +771,7 @@ A Bayesian-based occupancy modelling approach was used to estimate site occupanc
 
 
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE }
+```{r  jags, echo=FALSE, message=FALSE, warning=FALSE }
 ##Jags model
 #  sink("Dynocc.txt")
 # cat("
@@ -876,7 +888,7 @@ pres <- presn/total*100
 
 
 res <- data.frame(period=1:nperiods, present=pres)
-labs <- paste0("(",total,"/",presn,")")
+labs <- paste0("(",presn,"/",total,")")
 
 ggplot(res, aes(x=period, y=present))+geom_point()+geom_line()  +ylim(c(0,100)) + scale_x_continuous(breaks = 1:nperiods)+ylab("Percentage present") + geom_text(aes(x=period, y=5),label=labs, size=3) 
 }
